@@ -118,7 +118,8 @@
 
       <!-- Customizable -->
       <node pkg="simple_trajectory_generator" exec="simple_trajectory_generator_node" name="simple_trajectory_generator" output="screen">
-            <param name="csv_path" value="$(find-pkg-share simple_trajectory_generator)/data/raceline_awsim_30km_from_garage.csv"/>
+            <param name="csv_path2" value="$(find-pkg-share simple_trajectory_generator)/data/raceline_awsim_30km_from_garage.csv"/>
+            <param name="csv_path1" value="$(find-pkg-share simple_trajectory_generator)/data/raceline_cctb_30km_wide_from_garage.csv"/>
             <param name="z" value="6.5"/>
       </node>
       
@@ -126,11 +127,13 @@
   </group>
 
   <!-- Pure Pursuit -->
-  <let name="steering_tire_angle_gain_var" value="1.50" if="$(var simulation)"/>
-  <let name="steering_tire_angle_gain_var" value="1.639" unless="$(var simulation)"/>
+  <group if = "false">
+  <let name="steering_tire_angle_gain_var" value="2.2" if="$(var simulation)"/>
+  <let name="steering_tire_angle_gain_var" value="2.2" unless="$(var simulation)"/>
 
   <node pkg="simple_pure_pursuit" exec="simple_pure_pursuit" name="simple_pure_pursuit_node" output="screen">
     <param name="use_external_target_vel" value="false"/>
+    <param name="tau" value="1.15"/>    
     <param name="external_target_vel" value="10.0"/>
     <param name="lookahead_gain" value="0.5"/>
     <param name="lookahead_min_distance" value="3.5"/>
@@ -139,8 +142,18 @@
 
     <remap from="input/kinematics" to="/localization/kinematic_state"/>
     <remap from="input/trajectory" to="/planning/scenario_planning/trajectory"/>
-    <remap from="output/control_cmd" to="/control/command/control_cmd"/>
+    <remap from="output/control_cmd" to="/awsim/control_cmd"/>
   </node>
+</group>
+
+  <!--  MPC Controller-->
+<group if = "true">
+  <node pkg="mpc_controller" exec="mpc_controller" name="mpc" output="screen">
+    <remap from="output/control_cmd" to="/awsim/control_cmd"/>
+    <remap from="input/kinematics" to="/localization/kinematic_state"/>
+<param name="path_csv_file" value="$(find-pkg-share aichallenge_submit_launch)/data/traj_race_cl.csv"/>
+</node> 
+</group>
 
   <!-- Map -->
   <group>
