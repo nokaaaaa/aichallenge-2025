@@ -41,6 +41,7 @@
   <exec_depend>generic_type_utility</exec_depend>
   <exec_depend>topic_tools</exec_depend>
   <exec_depend>mpc_controller</exec_depend>
+  <exec_depend>steer_plot</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>autoware_lint_common</test_depend>

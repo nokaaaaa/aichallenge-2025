@@ -127,7 +127,7 @@
   </group>
 
   <!-- Pure Pursuit -->
-  <group if = "false">
+  <group if = "true">
   <let name="steering_tire_angle_gain_var" value="2.2" if="$(var simulation)"/>
   <let name="steering_tire_angle_gain_var" value="2.2" unless="$(var simulation)"/>
 
@@ -147,7 +147,7 @@
 </group>
 
   <!--  MPC Controller-->
-<group if = "true">
+<group if = "false">
   <node pkg="mpc_controller" exec="mpc_controller" name="mpc" output="screen">
     <remap from="output/control_cmd" to="/awsim/control_cmd"/>
     <remap from="input/kinematics" to="/localization/kinematic_state"/>
@@ -209,5 +209,12 @@
       <arg name="output_actuation_cmd" value="/control/command/actuation_cmd"/>
     </include>
   </group>
+
+  <!--plot-->
+    <node pkg="steer_plot" exec="plot" name="steer_plot" output="screen">
+      <remap from="input/steering" to="/vehicle/status/steering_status"/>
+      <remap from="input/control_cmd" to="/control/command/control_cmd"/>
+    </node>
+
 
 </launch>
