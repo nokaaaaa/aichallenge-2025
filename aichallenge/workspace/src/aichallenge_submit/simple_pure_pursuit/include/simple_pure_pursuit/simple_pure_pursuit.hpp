@@ -64,7 +64,7 @@ class SimplePurePursuit : public rclcpp::Node {
 
   // pure pursuit parameters
   const double wheel_base_;
-  const double tau_;
+  double tau_;
   const double lookahead_gain_;
   const double lookahead_min_distance_;
   const double speed_proportional_gain_;
