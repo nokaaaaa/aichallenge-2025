@@ -7,7 +7,7 @@
   <arg name="release_waypoint_count" default="5"/>
   <arg name="v2x_stale_timeout" default="0.5"/>
   <arg name="ego_vehicle_id" default="$(env VEHICLE_ID default)"/>
-  <arg name="enabled_ego_vehicle_id" default="P1"/>
+  <arg name="enabled_ego_vehicle_id" default=""/>
   <arg name="enable_recovery" default="true"/>
   <arg name="stuck_speed_threshold" default="0.2"/>
   <arg name="stuck_command_speed_threshold" default="1.0"/>
