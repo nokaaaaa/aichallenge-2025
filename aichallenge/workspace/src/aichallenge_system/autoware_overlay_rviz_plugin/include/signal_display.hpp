@@ -32,12 +32,15 @@
 #include <rviz_common/properties/int_property.hpp>
 #include <rviz_common/properties/ros_topic_property.hpp>
 
+#include <std_msgs/msg/string.hpp>
+
 #include <OgreColourValue.h>
 #include <OgreMaterial.h>
 #include <OgreTexture.h>
 
 #include <memory>
 #include <mutex>
+#include <string>
 #endif
 
 namespace autoware_overlay_rviz_plugin
@@ -69,6 +72,7 @@ private Q_SLOTS:
   void topic_updated_turn_signals();
   void topic_updated_hazard_lights();
   void topic_updated_traffic();
+  void topic_updated_vehicle_modes();
 
 private:
   std::mutex mutex_;
@@ -94,6 +98,7 @@ private:
   std::unique_ptr<rviz_common::properties::RosTopicProperty> hazard_lights_topic_property_;
   std::unique_ptr<rviz_common::properties::RosTopicProperty> traffic_topic_property_;
   std::unique_ptr<rviz_common::properties::RosTopicProperty> speed_limit_topic_property_;
+  std::unique_ptr<rviz_common::properties::RosTopicProperty> vehicle_modes_topic_property_;
 
   void drawHorizontalRoundedRectangle(QPainter & painter, const QRectF & backgroundRect);
   void drawVerticalRoundedRectangle(QPainter & painter, const QRectF & backgroundRect);
@@ -116,8 +121,10 @@ private:
   rclcpp::Subscription<autoware_perception_msgs::msg::TrafficLightElement>::SharedPtr traffic_sub_;
   rclcpp::Subscription<tier4_planning_msgs::msg::VelocityLimit>::SharedPtr
     speed_limit_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr vehicle_modes_sub_;
 
   std::mutex property_mutex_;
+  std::string vehicle_modes_text_;
 
   void updateGearData(const autoware_auto_vehicle_msgs::msg::GearReport::ConstSharedPtr & msg);
   void updateSteeringData(const autoware_auto_vehicle_msgs::msg::SteeringReport::ConstSharedPtr & msg);
@@ -130,7 +137,9 @@ private:
     const tier4_planning_msgs::msg::VelocityLimit::ConstSharedPtr msg);
   void updateTrafficLightData(
     const autoware_perception_msgs::msg::TrafficLightElement::ConstSharedPtr msg);
+  void updateVehicleModesData(const std_msgs::msg::String::ConstSharedPtr msg);
   void drawWidget(QImage & hud);
+  void drawVehicleModes(QPainter & painter, const QRectF & modeRect, const QColor & color);
 };
 }  // namespace autoware_overlay_rviz_plugin
 

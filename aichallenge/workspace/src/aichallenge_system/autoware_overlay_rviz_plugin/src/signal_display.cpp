@@ -16,6 +16,7 @@
 
 #include <QFontDatabase>
 #include <QPainter>
+#include <QStringList>
 #include <rclcpp/rclcpp.hpp>
 #include <rviz_common/properties/enum_property.hpp>
 #include <rviz_common/properties/ros_topic_property.hpp>
@@ -32,6 +33,7 @@
 #include <iomanip>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 
 namespace autoware_overlay_rviz_plugin
@@ -40,7 +42,7 @@ namespace autoware_overlay_rviz_plugin
 SignalDisplay::SignalDisplay()
 {
   property_width_ = new rviz_common::properties::IntProperty(
-    "Width", 550, "Width of the overlay", this, SLOT(updateOverlaySize()));
+    "Width", 790, "Width of the overlay", this, SLOT(updateOverlaySize()));
   property_height_ = new rviz_common::properties::IntProperty(
     "Height", 100, "Height of the overlay", this, SLOT(updateOverlaySize()));
   property_left_ = new rviz_common::properties::IntProperty(
@@ -137,6 +139,11 @@ void SignalDisplay::onInitialize()
     "autoware_perception_msgs/msgs/msg/TrafficLightElement", "Topic for Traffic Light Data", this,
     SLOT(topic_updated_traffic()));
   traffic_topic_property_->initialize(rviz_ros_node);
+
+  vehicle_modes_topic_property_ = std::make_unique<rviz_common::properties::RosTopicProperty>(
+    "Vehicle Modes Topic", "/v2x/vehicle_modes/text", "std_msgs/msg/String",
+    "Topic for V2X vehicle control mode summary", this, SLOT(topic_updated_vehicle_modes()));
+  vehicle_modes_topic_property_->initialize(rviz_ros_node);
 }
 
 void SignalDisplay::setupRosSubscriptions()
@@ -148,6 +155,7 @@ void SignalDisplay::setupRosSubscriptions()
   topic_updated_turn_signals();
   topic_updated_hazard_lights();
   topic_updated_traffic();
+  topic_updated_vehicle_modes();
 }
 
 SignalDisplay::~SignalDisplay()
@@ -161,6 +169,7 @@ SignalDisplay::~SignalDisplay()
   turn_signals_sub_.reset();
   hazard_lights_sub_.reset();
   traffic_sub_.reset();
+  vehicle_modes_sub_.reset();
 
   steering_wheel_display_.reset();
   gear_display_.reset();
@@ -175,6 +184,7 @@ SignalDisplay::~SignalDisplay()
   steering_topic_property_.reset();
   hazard_lights_topic_property_.reset();
   traffic_topic_property_.reset();
+  vehicle_modes_topic_property_.reset();
 }
 
 void SignalDisplay::update(float /* wall_dt */, float /* ros_dt */)
@@ -206,6 +216,7 @@ void SignalDisplay::onDisable()
   speed_sub_.reset();
   turn_signals_sub_.reset();
   hazard_lights_sub_.reset();
+  vehicle_modes_sub_.reset();
 
   if (overlay_) {
     overlay_->hide();
@@ -220,6 +231,13 @@ void SignalDisplay::updateTrafficLightData(
   if (traffic_display_) {
     traffic_display_->updateTrafficLightData(msg);
   }
+}
+
+void SignalDisplay::updateVehicleModesData(const std_msgs::msg::String::ConstSharedPtr msg)
+{
+  std::lock_guard<std::mutex> lock(property_mutex_);
+  vehicle_modes_text_ = msg->data;
+  queueRender();
 }
 
 void SignalDisplay::updateSpeedLimitData(
@@ -302,38 +320,83 @@ void SignalDisplay::drawWidget(QImage & hud)
 
   QRectF backgroundRect(0, 0, hud.width(), hud.height());
   drawHorizontalRoundedRectangle(painter, backgroundRect);
+  QRectF signalRect(0, 0, std::min(550.0, backgroundRect.width()), backgroundRect.height());
 
   // Draw components
   if (gear_display_) {
     gear_display_->drawGearIndicator(
-      painter, backgroundRect, property_primary_color_->getColor(),
+      painter, signalRect, property_primary_color_->getColor(),
       property_background_color_->getColor());
   }
 
   if (steering_wheel_display_) {
     steering_wheel_display_->drawSteeringWheel(
-      painter, backgroundRect, property_handle_angle_scale_->getFloat());
+      painter, signalRect, property_handle_angle_scale_->getFloat());
   }
 
   if (speed_display_) {
-    speed_display_->drawSpeedDisplay(painter, backgroundRect, property_primary_color_->getColor());
+    speed_display_->drawSpeedDisplay(painter, signalRect, property_primary_color_->getColor());
   }
   if (turn_signals_display_) {
-    turn_signals_display_->drawArrows(painter, backgroundRect, property_signal_color_->getColor());
+    turn_signals_display_->drawArrows(painter, signalRect, property_signal_color_->getColor());
   }
 
   if (traffic_display_) {
-    traffic_display_->drawTrafficLightIndicator(painter, backgroundRect);
+    traffic_display_->drawTrafficLightIndicator(painter, signalRect);
   }
 
   if (speed_limit_display_) {
     speed_limit_display_->drawSpeedLimitIndicator(
-      painter, backgroundRect, property_primary_color_->getColor(),
+      painter, signalRect, property_primary_color_->getColor(),
       property_light_limit_color_->getColor(), property_dark_limit_color_->getColor(),
       property_background_color_->getColor(), property_background_alpha_->getFloat());
   }
 
+  QRectF modeRect(
+    560, 10, std::max(0.0, backgroundRect.width() - 575.0), backgroundRect.height() - 20);
+  drawVehicleModes(painter, modeRect, property_primary_color_->getColor());
+
   painter.end();
+}
+
+void SignalDisplay::drawVehicleModes(
+  QPainter & painter, const QRectF & modeRect, const QColor & color)
+{
+  if (vehicle_modes_text_.empty() || modeRect.width() <= 0.0 || modeRect.height() <= 0.0) {
+    return;
+  }
+
+  painter.setPen(QPen(QColor(120, 120, 120, 180), 1));
+  painter.drawLine(
+    QPointF(modeRect.left() - 12, modeRect.top()),
+    QPointF(modeRect.left() - 12, modeRect.bottom()));
+
+  QFont titleFont("Quicksand", 9, QFont::Bold);
+  painter.setFont(titleFont);
+  painter.setPen(QColor(180, 180, 180));
+  painter.drawText(
+    QRectF(modeRect.left(), modeRect.top() - 2, modeRect.width(), 16), Qt::AlignLeft, "CONTROL");
+
+  QFont bodyFont("Quicksand", 11, QFont::DemiBold);
+  painter.setFont(bodyFont);
+  const QStringList lines =
+    QString::fromStdString(vehicle_modes_text_).split('\n', QString::SkipEmptyParts);
+  const double lineHeight = 18.0;
+  double y = modeRect.top() + 20.0;
+  for (const QString & line : lines) {
+    if (line.contains("MPC")) {
+      painter.setPen(QColor(0, 230, 230));
+    } else if (line.contains("No data")) {
+      painter.setPen(QColor(120, 120, 120));
+    } else {
+      painter.setPen(color);
+    }
+    painter.drawText(QRectF(modeRect.left(), y, modeRect.width(), lineHeight), Qt::AlignLeft, line);
+    y += lineHeight;
+    if (y + lineHeight > modeRect.bottom() + 1.0) {
+      break;
+    }
+  }
 }
 
 void SignalDisplay::drawHorizontalRoundedRectangle(
@@ -506,6 +569,17 @@ void SignalDisplay::topic_updated_traffic()
                      [this](const autoware_perception_msgs::msg::TrafficLightElement::SharedPtr msg) {
                        updateTrafficLightData(msg);
                      });
+}
+
+void SignalDisplay::topic_updated_vehicle_modes()
+{
+  vehicle_modes_sub_.reset();
+  auto rviz_ros_node = context_->getRosNodeAbstraction().lock();
+  vehicle_modes_sub_ =
+    rviz_ros_node->get_raw_node()->create_subscription<std_msgs::msg::String>(
+      vehicle_modes_topic_property_->getTopicStd(),
+      rclcpp::QoS(rclcpp::KeepLast(10)).durability_volatile().reliable(),
+      [this](const std_msgs::msg::String::SharedPtr msg) { updateVehicleModesData(msg); });
 }
 
 }  // namespace autoware_overlay_rviz_plugin

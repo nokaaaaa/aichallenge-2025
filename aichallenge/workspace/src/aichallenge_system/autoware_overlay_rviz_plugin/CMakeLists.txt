@@ -69,6 +69,7 @@ ament_target_dependencies(${PROJECT_NAME} PUBLIC
   rviz_common
   rviz_rendering
   autoware_auto_vehicle_msgs
+  std_msgs
   tier4_planning_msgs
   autoware_perception_msgs
 )

@@ -504,7 +504,8 @@ Visualization Manager:
           Traffic Topic: /planning/scenario_planning/lane_driving/behavior_planning/debug/traffic_signal
           Turn Signals Topic: /vehicle/status/turn_indicators_status
           Value: true
-          Width: 550
+          Vehicle Modes Topic: /v2x/vehicle_modes/text
+          Width: 790
         - Alpha: 0.9990000128746033
           Class: rviz_plugins/VelocityHistory
           Color Border Vel Max: 10
@@ -530,6 +531,7 @@ Visualization Manager:
           Enabled: true
           Name: VehicleMarkers
           Namespaces:
+            v2x_vehicle_modes: true
             v2x_vehicles: true
           Topic:
             Depth: 5

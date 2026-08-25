@@ -5,5 +5,18 @@
        AWSIM publishes /v2x/vehicle_positions natively per vehicle domain
        via MultiDomainV2XVehiclePositionFanout, so no domain bridge or
        per-vehicle gnss_poser is needed here. -->
-  <node pkg="aichallenge_system_launch" exec="v2x_marker_publisher.py" name="v2x_marker_publisher" output="screen"/>
+  <node pkg="aichallenge_system_launch" exec="v2x_marker_publisher.py" name="v2x_marker_publisher" output="screen">
+    <param name="show_mode_labels" value="false"/>
+    <param name="publish_mode_summary" value="true"/>
+    <param name="vehicle_ids" value="['d1', 'd2', 'd3', 'd4']"/>
+    <param name="kinematics_topic" value="/localization/kinematic_state"/>
+    <param name="switch_distance" value="12.0"/>
+    <param name="release_distance" value="16.0"/>
+    <param name="label_frame_id" value="map"/>
+    <param name="label_origin_x" value="0.0"/>
+    <param name="label_origin_y" value="0.0"/>
+    <param name="label_origin_z" value="3.0"/>
+    <param name="label_line_spacing" value="1.0"/>
+    <param name="label_scale" value="0.7"/>
+  </node>
 </launch>
