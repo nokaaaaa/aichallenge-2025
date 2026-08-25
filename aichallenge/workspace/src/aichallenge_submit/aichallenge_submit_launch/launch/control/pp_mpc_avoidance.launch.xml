@@ -4,7 +4,7 @@
   <arg name="use_sim_time" default="true"/>
   <arg name="track" default="citycircuit"/>
   <arg name="switch_waypoint_count" default="6"/>
-  <arg name="release_waypoint_count" default="4"/>
+  <arg name="release_waypoint_count" default="1"/>
   <arg name="v2x_stale_timeout" default="0.5"/>
   <arg name="ego_vehicle_id" default="$(env VEHICLE_ID default)"/>
   <arg name="enable_recovery" default="true"/>

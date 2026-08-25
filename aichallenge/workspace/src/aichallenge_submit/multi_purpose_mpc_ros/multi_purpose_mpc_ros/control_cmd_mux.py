@@ -46,7 +46,7 @@ class ControlCmdMux(Node):
         self.declare_parameter("v2x_topic", "/v2x/vehicle_positions")
         self.declare_parameter("ego_vehicle_id", os.environ.get("VEHICLE_ID", ""))
         self.declare_parameter("switch_waypoint_count", 6)
-        self.declare_parameter("release_waypoint_count", 4)
+        self.declare_parameter("release_waypoint_count", 1)
         self.declare_parameter("v2x_stale_timeout", 0.5)
         self.declare_parameter("enable_recovery", True)
         self.declare_parameter("condition_topic", "/aichallenge/pitstop/condition")

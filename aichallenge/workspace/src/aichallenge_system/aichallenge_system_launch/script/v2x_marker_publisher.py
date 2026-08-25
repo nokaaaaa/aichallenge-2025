@@ -66,7 +66,7 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
         self.declare_parameter("kinematics_topic", "/localization/kinematic_state")
         self.declare_parameter("trajectory_topic", "/planning/scenario_planning/trajectory")
         self.declare_parameter("switch_waypoint_count", 6)
-        self.declare_parameter("release_waypoint_count", 4)
+        self.declare_parameter("release_waypoint_count", 1)
         self.declare_parameter("label_frame_id", "map")
         self.declare_parameter("label_origin_x", 0.0)
         self.declare_parameter("label_origin_y", 0.0)
