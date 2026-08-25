@@ -17,7 +17,8 @@
   <arg name="recovery_brake_duration" default="0.3"/>
   <arg name="recovery_shift_reverse_duration" default="0.5"/>
   <arg name="recovery_min_reverse_duration" default="0.5"/>
-  <arg name="recovery_max_reverse_duration" default="1.5"/>
+  <arg name="recovery_max_reverse_duration" default="2.5"/>
+  <arg name="recovery_min_reverse_distance" default="0.8"/>
   <arg name="recovery_shift_drive_duration" default="0.3"/>
   <arg name="recovery_min_forward_duration" default="0.5"/>
   <arg name="recovery_max_forward_duration" default="0.0"/>
@@ -83,6 +84,7 @@
     <param name="recovery_shift_reverse_duration" value="$(var recovery_shift_reverse_duration)"/>
     <param name="recovery_min_reverse_duration" value="$(var recovery_min_reverse_duration)"/>
     <param name="recovery_max_reverse_duration" value="$(var recovery_max_reverse_duration)"/>
+    <param name="recovery_min_reverse_distance" value="$(var recovery_min_reverse_distance)"/>
     <param name="recovery_shift_drive_duration" value="$(var recovery_shift_drive_duration)"/>
     <param name="recovery_min_forward_duration" value="$(var recovery_min_forward_duration)"/>
     <param name="recovery_max_forward_duration" value="$(var recovery_max_forward_duration)"/>

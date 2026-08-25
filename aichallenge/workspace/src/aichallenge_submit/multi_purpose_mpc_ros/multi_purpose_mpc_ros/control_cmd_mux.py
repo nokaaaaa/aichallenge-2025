@@ -60,7 +60,8 @@ class ControlCmdMux(Node):
         self.declare_parameter("recovery_brake_duration", 0.3)
         self.declare_parameter("recovery_shift_reverse_duration", 0.5)
         self.declare_parameter("recovery_min_reverse_duration", 0.5)
-        self.declare_parameter("recovery_max_reverse_duration", 1.5)
+        self.declare_parameter("recovery_max_reverse_duration", 2.5)
+        self.declare_parameter("recovery_min_reverse_distance", 0.8)
         self.declare_parameter("recovery_shift_drive_duration", 0.3)
         self.declare_parameter("recovery_min_forward_duration", 0.5)
         self.declare_parameter("recovery_max_forward_duration", 0.0)
@@ -106,6 +107,8 @@ class ControlCmdMux(Node):
             self.get_parameter("recovery_min_reverse_duration").value)
         self._recovery_max_reverse_duration = float(
             self.get_parameter("recovery_max_reverse_duration").value)
+        self._recovery_min_reverse_distance = float(
+            self.get_parameter("recovery_min_reverse_distance").value)
         self._recovery_shift_drive_duration = float(
             self.get_parameter("recovery_shift_drive_duration").value)
         self._recovery_min_forward_duration = float(
@@ -144,6 +147,7 @@ class ControlCmdMux(Node):
         self._recovery_brake_until = None
         self._recovery_shift_reverse_until = None
         self._recovery_reverse_started_at = None
+        self._recovery_reverse_start_pose: Optional[Tuple[float, float]] = None
         self._recovery_reverse_until = None
         self._recovery_shift_drive_until = None
         self._recovery_forward_started_at = None
@@ -304,6 +308,7 @@ class ControlCmdMux(Node):
         else:
             self._recovery_reverse_until = None
         self._recovery_reverse_started_at = None
+        self._recovery_reverse_start_pose = None
         self._recovery_shift_drive_until = None
         self._recovery_forward_started_at = None
         self._recovery_forward_until = None
@@ -312,6 +317,7 @@ class ControlCmdMux(Node):
         self.get_logger().warn(
             f"Starting recovery: brake {self._recovery_brake_duration:.1f}s, "
             f"shift reverse {self._recovery_shift_reverse_duration:.1f}s, "
+            f"reverse at least {self._recovery_min_reverse_distance:.1f}m, "
             f"short reverse then path-approach forward if needed: {reason}")
         self._publish_recovery_command()
 
@@ -333,6 +339,7 @@ class ControlCmdMux(Node):
             ):
                 self._recovery_state = RecoveryState.REVERSE
                 self._recovery_reverse_started_at = now
+                self._recovery_reverse_start_pose = self._current_xy()
             else:
                 self._publish_gear(GearCommand.REVERSE)
                 self._publish_manual_command(speed=0.0, acceleration=0.0, steering=0.0)
@@ -474,7 +481,26 @@ class ControlCmdMux(Node):
         elapsed = (now - self._recovery_reverse_started_at).nanoseconds * 1e-9
         if elapsed < self._recovery_min_reverse_duration:
             return False
-        return self._is_close_to_path()
+        return self._has_reversed_enough() and self._is_close_to_path()
+
+    def _has_reversed_enough(self) -> bool:
+        if self._recovery_min_reverse_distance <= 0.0:
+            return True
+        start_xy = self._recovery_reverse_start_pose
+        current_xy = self._current_xy()
+        if start_xy is None or current_xy is None:
+            return False
+        return math.hypot(current_xy[0] - start_xy[0], current_xy[1] - start_xy[1]) >= (
+            self._recovery_min_reverse_distance
+        )
+
+    def _current_xy(self) -> Optional[Tuple[float, float]]:
+        if self._odom is None:
+            return None
+        return (
+            float(self._odom.pose.pose.position.x),
+            float(self._odom.pose.pose.position.y),
+        )
 
     def _should_finish_forward_recovery(self, now) -> bool:
         if self._recovery_forward_started_at is None:
