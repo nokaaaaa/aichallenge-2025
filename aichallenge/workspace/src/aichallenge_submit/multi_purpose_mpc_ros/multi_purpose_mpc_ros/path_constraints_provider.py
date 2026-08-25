@@ -28,7 +28,7 @@ from multi_purpose_mpc_ros.core.MPC import MPC
 from multi_purpose_mpc_ros.core.utils import load_waypoints, kmh_to_m_per_sec, load_ref_path
 
 # Project
-from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
+from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists, resolve_package_path
 from multi_purpose_mpc_ros.obstacle_manager import ObstacleManager
 from multi_purpose_mpc_ros_msgs.msg import PathConstraints, BorderCells
 
@@ -268,4 +268,4 @@ class PathConstraintsProvider(Node):
 
     @classmethod
     def in_pkg_share(cls, file_path: str) -> str:
-        return cls.PKG_PATH + file_path
+        return resolve_package_path(file_path, cls.PKG_PATH)

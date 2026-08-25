@@ -5,6 +5,7 @@ import argparse
 from collections import namedtuple
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 
 def parse_args_without_ros(argv):
     args_without_ros = rclpy.utilities.remove_ros_args(argv) # type: ignore
@@ -31,3 +32,13 @@ def convert_to_namedtuple(
 def file_exists(file_path: str) -> None:
     if not os.path.exists(file_path):
         raise FileNotFoundError("File not found: " + file_path)
+
+def resolve_package_path(file_path: str, default_package_share: str) -> str:
+    if os.path.isabs(file_path):
+        return file_path
+    package_prefix = "package://"
+    if file_path.startswith(package_prefix):
+        package_path = file_path[len(package_prefix):]
+        package_name, _, relative_path = package_path.partition("/")
+        return os.path.join(get_package_share_directory(package_name), relative_path)
+    return os.path.join(default_package_share, file_path)

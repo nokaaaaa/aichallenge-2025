@@ -12,7 +12,7 @@ from multi_purpose_mpc_ros.core.reference_path import ReferencePath
 from multi_purpose_mpc_ros.core.utils import load_waypoints, load_ref_path
 
 # Project
-from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists
+from multi_purpose_mpc_ros.common import convert_to_namedtuple, file_exists, resolve_package_path
 
 
 class ReferencePathGenerator():
@@ -75,4 +75,4 @@ class ReferencePathGenerator():
 
     @classmethod
     def __in_pkg_share(cls, file_path: str) -> str:
-        return cls.PKG_PATH + file_path
+        return resolve_package_path(file_path, cls.PKG_PATH)
