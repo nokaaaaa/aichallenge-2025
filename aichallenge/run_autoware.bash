@@ -25,6 +25,10 @@ case "${mode}" in
 esac
 
 export ROS_DOMAIN_ID=$id
+control_method="${CONTROL_METHOD:-}"
+if [ -n "${control_method}" ]; then
+    opts+=("control_method:=${control_method}")
+fi
 
 mkdir -p "${out_dir}"
 exec >"${out_dir}/autoware.log" 2>&1

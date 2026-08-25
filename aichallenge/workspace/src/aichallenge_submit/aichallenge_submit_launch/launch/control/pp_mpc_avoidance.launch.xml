@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+  <arg name="simulation" default="true"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="track" default="citycircuit"/>
+  <arg name="switch_distance" default="12.0"/>
+  <arg name="release_distance" default="16.0"/>
+  <arg name="v2x_stale_timeout" default="0.5"/>
+  <arg name="ego_vehicle_id" default="$(env VEHICLE_ID default)"/>
+  <arg name="enable_recovery" default="true"/>
+  <arg name="stuck_speed_threshold" default="0.2"/>
+  <arg name="stuck_command_speed_threshold" default="1.0"/>
+  <arg name="stuck_duration" default="1.0"/>
+  <arg name="recovery_startup_grace" default="8.0"/>
+  <arg name="recovery_enable_after_speed" default="0.5"/>
+  <arg name="recovery_brake_duration" default="0.3"/>
+  <arg name="recovery_shift_reverse_duration" default="0.5"/>
+  <arg name="recovery_min_reverse_duration" default="0.5"/>
+  <arg name="recovery_max_reverse_duration" default="1.5"/>
+  <arg name="recovery_shift_drive_duration" default="0.3"/>
+  <arg name="recovery_min_forward_duration" default="0.5"/>
+  <arg name="recovery_max_forward_duration" default="0.0"/>
+  <arg name="recovery_blocked_speed_threshold" default="0.1"/>
+  <arg name="recovery_blocked_duration" default="0.8"/>
+  <arg name="recovery_use_nan_speed" default="false"/>
+  <arg name="recovery_speed" default="1.0"/>
+  <arg name="recovery_forward_speed" default="1.2"/>
+  <arg name="recovery_acceleration" default="3.0"/>
+  <arg name="recovery_steering_mode" default="path_approach"/>
+  <arg name="recovery_max_steering_angle" default="0.5"/>
+  <arg name="recovery_path_distance_threshold" default="0.8"/>
+  <arg name="recovery_path_approach_distance" default="2.0"/>
+  <arg name="recovery_cooldown" default="1.0"/>
+
+  <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/pure_pursuit.launch.xml">
+    <arg name="simulation" value="$(var simulation)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="control_cmd_topic" value="/control/command/pure_pursuit_cmd"/>
+  </include>
+
+  <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/mpc.launch.xml">
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="track" value="$(var track)"/>
+    <arg name="use_obstacle_avoidance" value="true"/>
+    <arg name="control_cmd_topic" value="/control/command/mpc_cmd"/>
+    <arg name="raw_control_cmd_topic" value="/control/command/mpc_cmd_raw"/>
+  </include>
+
+  <node pkg="multi_purpose_mpc_ros" exec="control_cmd_mux" name="control_cmd_mux" output="screen">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="pure_pursuit_cmd_topic" value="/control/command/pure_pursuit_cmd"/>
+    <param name="mpc_cmd_topic" value="/control/command/mpc_cmd"/>
+    <param name="output_cmd_topic" value="/control/command/control_cmd"/>
+    <param name="gear_cmd_topic" value="/control/command/gear_cmd"/>
+    <param name="kinematics_topic" value="/localization/kinematic_state"/>
+    <param name="trajectory_topic" value="/planning/scenario_planning/trajectory"/>
+    <param name="v2x_topic" value="/v2x/vehicle_positions"/>
+    <param name="ego_vehicle_id" value="$(var ego_vehicle_id)"/>
+    <param name="switch_distance" value="$(var switch_distance)"/>
+    <param name="release_distance" value="$(var release_distance)"/>
+    <param name="v2x_stale_timeout" value="$(var v2x_stale_timeout)"/>
+    <param name="enable_recovery" value="$(var enable_recovery)"/>
+    <param name="stuck_speed_threshold" value="$(var stuck_speed_threshold)"/>
+    <param name="stuck_command_speed_threshold" value="$(var stuck_command_speed_threshold)"/>
+    <param name="stuck_duration" value="$(var stuck_duration)"/>
+    <param name="recovery_startup_grace" value="$(var recovery_startup_grace)"/>
+    <param name="recovery_enable_after_speed" value="$(var recovery_enable_after_speed)"/>
+    <param name="recovery_brake_duration" value="$(var recovery_brake_duration)"/>
+    <param name="recovery_shift_reverse_duration" value="$(var recovery_shift_reverse_duration)"/>
+    <param name="recovery_min_reverse_duration" value="$(var recovery_min_reverse_duration)"/>
+    <param name="recovery_max_reverse_duration" value="$(var recovery_max_reverse_duration)"/>
+    <param name="recovery_shift_drive_duration" value="$(var recovery_shift_drive_duration)"/>
+    <param name="recovery_min_forward_duration" value="$(var recovery_min_forward_duration)"/>
+    <param name="recovery_max_forward_duration" value="$(var recovery_max_forward_duration)"/>
+    <param name="recovery_blocked_speed_threshold" value="$(var recovery_blocked_speed_threshold)"/>
+    <param name="recovery_blocked_duration" value="$(var recovery_blocked_duration)"/>
+    <param name="recovery_use_nan_speed" value="$(var recovery_use_nan_speed)"/>
+    <param name="recovery_speed" value="$(var recovery_speed)"/>
+    <param name="recovery_forward_speed" value="$(var recovery_forward_speed)"/>
+    <param name="recovery_acceleration" value="$(var recovery_acceleration)"/>
+    <param name="recovery_steering_mode" value="$(var recovery_steering_mode)"/>
+    <param name="recovery_max_steering_angle" value="$(var recovery_max_steering_angle)"/>
+    <param name="recovery_path_distance_threshold" value="$(var recovery_path_distance_threshold)"/>
+    <param name="recovery_path_approach_distance" value="$(var recovery_path_approach_distance)"/>
+    <param name="recovery_cooldown" value="$(var recovery_cooldown)"/>
+  </node>
+</launch>

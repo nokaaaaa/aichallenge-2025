@@ -13,6 +13,10 @@
 
 
   <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>nav_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>autoware_auto_vehicle_msgs</depend>
   <depend>multi_purpose_mpc_ros_msgs</depend>
   <depend>autoware_auto_control_msgs</depend>
   <depend>v2x_msgs</depend>

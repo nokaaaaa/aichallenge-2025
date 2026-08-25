@@ -134,12 +134,16 @@ class MPCController(Node):
         self.declare_parameter("use_boost_acceleration", False)
         self.declare_parameter("use_obstacle_avoidance", False)
         self.declare_parameter("use_stats", False)
+        self.declare_parameter("control_cmd_topic", "/control/command/control_cmd")
+        self.declare_parameter("raw_control_cmd_topic", "/control/command/control_cmd_raw")
 
         # get parameters
         self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
         self.USE_BUG_ACC = self.get_parameter("use_boost_acceleration").get_parameter_value().bool_value
         self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
+        self._control_cmd_topic = self.get_parameter("control_cmd_topic").get_parameter_value().string_value
+        self._raw_control_cmd_topic = self.get_parameter("raw_control_cmd_topic").get_parameter_value().string_value
 
         self._config_path = config_path
         self._ref_vel_config_path: Optional[str] = ref_vel_config_path
@@ -500,9 +504,9 @@ class MPCController(Node):
             AckermannControlBoostCommand, "/boost_commander/command", 1)
         else:
           self._command_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd", 1)
+            AckermannControlCommand, self._control_cmd_topic, 1)
           self._command_raw_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd_raw", 1)
+            AckermannControlCommand, self._raw_control_cmd_topic, 1)
           print("use normal ackermann control command")
 
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
@@ -571,6 +575,7 @@ class MPCController(Node):
         return ackerman_boost_cmd
 
     def _publish_control_command(self, stamp, u, acc, bug_acc_enabled):
+        acc = 3.0
         cmd = self._create_ackerman_control_command(stamp, u, acc, bug_acc_enabled)
 
         # publish raw control command
