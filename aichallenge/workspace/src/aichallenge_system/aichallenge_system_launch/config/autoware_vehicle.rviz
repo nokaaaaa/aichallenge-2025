@@ -58,6 +58,26 @@ Visualization Manager:
         Constant Color: true
         Scale: 0.8999999761581421
         Value: false
+    - Class: rviz_default_plugins/Path
+      Color: 255; 80; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.25
+      Name: OvertakeTargetPath
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.05
+      Pose Color: 255; 80; 0
+      Pose Style: None
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        Filter size: 1
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /planning/overtake/target_path
+      Value: true
     - Angle Tolerance: 1
       Class: rviz_default_plugins/Odometry
       Covariance:

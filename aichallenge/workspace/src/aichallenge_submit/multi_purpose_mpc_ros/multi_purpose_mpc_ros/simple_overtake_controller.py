@@ -13,7 +13,8 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from autoware_auto_control_msgs.msg import AckermannControlCommand
 from autoware_auto_planning_msgs.msg import Trajectory
 from ament_index_python.packages import get_package_share_directory
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry, Path
 from skimage.morphology import binary_dilation, disk
 from v2x_msgs.msg import V2XVehiclePositionArray
 
@@ -226,6 +227,7 @@ class SimpleOvertakeController(Node):
         self.declare_parameter("map_yaml_path", "env/final_ver3/occupancy_grid_map.yaml")
         self.declare_parameter("wheel_base", 1.087)
         self.declare_parameter("lookahead_waypoints", 6)
+        self.declare_parameter("lookahead_distance", 3.0)
         self.declare_parameter("vehicle_search_waypoints", 12)
         self.declare_parameter("planning_goal_waypoints", 70)
         self.declare_parameter("planning_margin", 4.0)
@@ -237,11 +239,13 @@ class SimpleOvertakeController(Node):
         self.declare_parameter("min_acceleration", -2.0)
         self.declare_parameter("max_acceleration", 3.0)
         self.declare_parameter("steering_limit", 0.64)
+        self.declare_parameter("debug_path_topic", "/planning/overtake/target_path")
 
         self._ego_vehicle_id = str(self.get_parameter("ego_vehicle_id").value)
         self._enabled_ego_vehicle_id = str(self.get_parameter("enabled_ego_vehicle_id").value)
         self._wheel_base = float(self.get_parameter("wheel_base").value)
         self._lookahead_waypoints = int(self.get_parameter("lookahead_waypoints").value)
+        self._lookahead_distance = float(self.get_parameter("lookahead_distance").value)
         self._vehicle_search_waypoints = int(self.get_parameter("vehicle_search_waypoints").value)
         self._planning_goal_waypoints = int(self.get_parameter("planning_goal_waypoints").value)
         self._target_speed = float(self.get_parameter("target_speed").value)
@@ -258,6 +262,7 @@ class SimpleOvertakeController(Node):
         self._vehicles: List[Tuple[str, float, float]] = []
 
         output_topic = str(self.get_parameter("output_cmd_topic").value)
+        debug_path_topic = str(self.get_parameter("debug_path_topic").value)
         kinematics_topic = str(self.get_parameter("kinematics_topic").value)
         trajectory_topic = str(self.get_parameter("trajectory_topic").value)
         v2x_topic = str(self.get_parameter("v2x_topic").value)
@@ -274,6 +279,7 @@ class SimpleOvertakeController(Node):
         )
 
         self._pub = self.create_publisher(AckermannControlCommand, output_topic, 1)
+        self._path_pub = self.create_publisher(Path, debug_path_topic, 1)
         self.create_subscription(Odometry, kinematics_topic, self._odom_callback, 1)
         trajectory_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -286,7 +292,8 @@ class SimpleOvertakeController(Node):
 
         self.get_logger().info(
             f"Costmap overtake controller publishing '{output_topic}' for "
-            f"ego='{self._enabled_ego_vehicle_id}' using map '{map_yaml_path}'")
+            f"ego='{self._enabled_ego_vehicle_id}' using map '{map_yaml_path}', "
+            f"debug path='{debug_path_topic}'")
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -323,6 +330,7 @@ class SimpleOvertakeController(Node):
         if target_vehicle is None:
             self._planned_path = []
             self._planned_for_vehicle_id = None
+            self._publish_path([])
             return
 
         vehicle_id, _target_x, _target_y = target_vehicle
@@ -330,6 +338,7 @@ class SimpleOvertakeController(Node):
             self._planned_path = self._plan_overtake_path(ego_idx)
             self._planned_for_vehicle_id = vehicle_id
             self._last_plan_time = self.get_clock().now()
+            self._publish_path(self._planned_path)
         if not self._planned_path:
             return
 
@@ -340,6 +349,9 @@ class SimpleOvertakeController(Node):
         dy = target_y - ego_y
         local_x = math.cos(yaw) * dx + math.sin(yaw) * dy
         local_y = -math.sin(yaw) * dx + math.cos(yaw) * dy
+        if local_x <= 0.0:
+            self.get_logger().warn("Overtake target point is behind ego; skipping command")
+            return
         lookahead_distance = max(math.hypot(local_x, local_y), 1e-3)
         alpha = math.atan2(local_y, local_x)
         steering = math.atan2(2.0 * self._wheel_base * math.sin(alpha), lookahead_distance)
@@ -423,8 +435,24 @@ class SimpleOvertakeController(Node):
             key=lambda i: (self._planned_path[i][0] - ego_x) ** 2
             + (self._planned_path[i][1] - ego_y) ** 2,
         )
-        target_idx = min(nearest_idx + self._lookahead_waypoints, len(self._planned_path) - 1)
-        return self._planned_path[target_idx]
+        if len(self._planned_path) <= 1:
+            return self._planned_path[nearest_idx]
+
+        distance_left = max(self._lookahead_distance, 0.1)
+        prev_x, prev_y = self._planned_path[nearest_idx]
+        for idx in range(nearest_idx + 1, len(self._planned_path)):
+            next_x, next_y = self._planned_path[idx]
+            segment_length = math.hypot(next_x - prev_x, next_y - prev_y)
+            if segment_length >= distance_left:
+                ratio = distance_left / max(segment_length, 1e-6)
+                return (
+                    prev_x + ratio * (next_x - prev_x),
+                    prev_y + ratio * (next_y - prev_y),
+                )
+            distance_left -= segment_length
+            prev_x, prev_y = next_x, next_y
+
+        return self._planned_path[-1]
 
     def _odom_yaw(self) -> float:
         q = self._odom.pose.pose.orientation
@@ -442,6 +470,22 @@ class SimpleOvertakeController(Node):
         cmd.lateral.stamp = stamp
         cmd.lateral.steering_tire_angle = steering
         self._pub.publish(cmd)
+
+    def _publish_path(self, path_xy: List[Tuple[float, float]]) -> None:
+        msg = Path()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        if self._trajectory is not None and self._trajectory.header.frame_id:
+            msg.header.frame_id = self._trajectory.header.frame_id
+        else:
+            msg.header.frame_id = "map"
+        for x, y in path_xy:
+            pose = PoseStamped()
+            pose.header = msg.header
+            pose.pose.position.x = float(x)
+            pose.pose.position.y = float(y)
+            pose.pose.orientation.w = 1.0
+            msg.poses.append(pose)
+        self._path_pub.publish(msg)
 
 
 def main(args=None) -> None:

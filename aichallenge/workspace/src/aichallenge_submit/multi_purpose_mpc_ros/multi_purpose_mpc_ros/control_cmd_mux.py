@@ -49,6 +49,7 @@ class ControlCmdMux(Node):
         self.declare_parameter("switch_waypoint_count", 6)
         self.declare_parameter("release_waypoint_count", 1)
         self.declare_parameter("v2x_stale_timeout", 0.5)
+        self.declare_parameter("mpc_cmd_timeout", 0.3)
         self.declare_parameter("enable_recovery", True)
         self.declare_parameter("condition_topic", "/aichallenge/pitstop/condition")
         self.declare_parameter("condition_jump_threshold", 30.0)
@@ -91,6 +92,7 @@ class ControlCmdMux(Node):
         self._switch_waypoint_count = int(self.get_parameter("switch_waypoint_count").value)
         self._release_waypoint_count = int(self.get_parameter("release_waypoint_count").value)
         self._v2x_stale_timeout = float(self.get_parameter("v2x_stale_timeout").value)
+        self._mpc_cmd_timeout = float(self.get_parameter("mpc_cmd_timeout").value)
         self._enable_recovery = bool(self.get_parameter("enable_recovery").value)
         self._condition_jump_threshold = float(self.get_parameter("condition_jump_threshold").value)
         self._stuck_speed_threshold = float(self.get_parameter("stuck_speed_threshold").value)
@@ -140,6 +142,8 @@ class ControlCmdMux(Node):
         self._mpc_target_vehicle_id: Optional[str] = None
         self._last_pp_cmd: Optional[AckermannControlCommand] = None
         self._last_mpc_cmd: Optional[AckermannControlCommand] = None
+        self._last_pp_cmd_time = None
+        self._last_mpc_cmd_time = None
         self._stuck_since = None
         self._recovery_state = RecoveryState.IDLE
         self._node_start_time = self.get_clock().now()
@@ -178,11 +182,13 @@ class ControlCmdMux(Node):
 
     def _pp_cmd_callback(self, msg: AckermannControlCommand) -> None:
         self._last_pp_cmd = msg
+        self._last_pp_cmd_time = self.get_clock().now()
         if not self._use_mpc and not self._is_recovering():
             self._pub.publish(msg)
 
     def _mpc_cmd_callback(self, msg: AckermannControlCommand) -> None:
         self._last_mpc_cmd = msg
+        self._last_mpc_cmd_time = self.get_clock().now()
         if self._use_mpc and not self._is_recovering():
             self._pub.publish(msg)
 
@@ -232,10 +238,15 @@ class ControlCmdMux(Node):
             self._recovery_state = RecoveryState.IDLE
             self.get_logger().info("Recovery finished; resuming selected controller")
             self._publish_gear(GearCommand.DRIVE)
-            cmd = self._last_mpc_cmd if self._use_mpc else self._last_pp_cmd
+            cmd = (
+                self._last_mpc_cmd
+                if self._use_mpc and self._has_fresh_mpc_cmd()
+                else self._last_pp_cmd
+            )
             if cmd is not None:
                 self._pub.publish(cmd)
         self._stale_check()
+        self._publish_fallback_if_overtake_not_ready()
 
     def _stale_check(self) -> None:
         if self._last_v2x_time is None:
@@ -660,9 +671,21 @@ class ControlCmdMux(Node):
         mode = "MPC" if use_mpc else "Pure Pursuit"
         self.get_logger().info(f"Switched to {mode}: {reason}")
 
-        cmd = self._last_mpc_cmd if use_mpc else self._last_pp_cmd
+        cmd = self._last_mpc_cmd if use_mpc and self._has_fresh_mpc_cmd() else self._last_pp_cmd
         if cmd is not None:
             self._pub.publish(cmd)
+
+    def _has_fresh_mpc_cmd(self) -> bool:
+        if self._last_mpc_cmd is None or self._last_mpc_cmd_time is None:
+            return False
+        age = (self.get_clock().now() - self._last_mpc_cmd_time).nanoseconds * 1e-9
+        return age <= self._mpc_cmd_timeout
+
+    def _publish_fallback_if_overtake_not_ready(self) -> None:
+        if not self._use_mpc or self._is_recovering() or self._has_fresh_mpc_cmd():
+            return
+        if self._last_pp_cmd is not None:
+            self._pub.publish(self._last_pp_cmd)
 
 
 def main(args=None) -> None:
