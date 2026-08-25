@@ -219,6 +219,20 @@ def test_nearest_waypoint_index_uses_vehicle_position():
     assert nearest_waypoint_index(waypoints, 11.0, 2.0) == 1
 
 
+def test_forward_waypoint_distance_is_directional():
+    from multi_purpose_mpc_ros.v2x_vehicle_tracker import forward_waypoint_distance
+
+    assert forward_waypoint_distance(10, 16, 100) == 6
+    assert forward_waypoint_distance(16, 10, 100) == 94
+
+
+def test_forward_waypoint_distance_wraps_around():
+    from multi_purpose_mpc_ros.v2x_vehicle_tracker import forward_waypoint_distance
+
+    assert forward_waypoint_distance(98, 2, 100) == 4
+    assert forward_waypoint_distance(2, 98, 100) == 96
+
+
 def test_circular_waypoint_distance_wraps_around_track_end():
     from multi_purpose_mpc_ros.v2x_vehicle_tracker import circular_waypoint_distance
 

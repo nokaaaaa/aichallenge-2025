@@ -18,7 +18,7 @@ from std_msgs.msg import Int32
 from v2x_msgs.msg import V2XVehiclePositionArray
 
 from multi_purpose_mpc_ros.v2x_vehicle_tracker import (
-    circular_waypoint_distance,
+    forward_waypoint_distance,
     nearest_waypoint_index,
 )
 
@@ -45,8 +45,8 @@ class ControlCmdMux(Node):
         self.declare_parameter("trajectory_topic", "/planning/scenario_planning/trajectory")
         self.declare_parameter("v2x_topic", "/v2x/vehicle_positions")
         self.declare_parameter("ego_vehicle_id", os.environ.get("VEHICLE_ID", ""))
-        self.declare_parameter("switch_waypoint_count", 12)
-        self.declare_parameter("release_waypoint_count", 16)
+        self.declare_parameter("switch_waypoint_count", 6)
+        self.declare_parameter("release_waypoint_count", 4)
         self.declare_parameter("v2x_stale_timeout", 0.5)
         self.declare_parameter("enable_recovery", True)
         self.declare_parameter("condition_topic", "/aichallenge/pitstop/condition")
@@ -127,17 +127,12 @@ class ControlCmdMux(Node):
             self.get_parameter("recovery_path_approach_distance").value)
         self._recovery_cooldown = float(self.get_parameter("recovery_cooldown").value)
 
-        if self._release_waypoint_count < self._switch_waypoint_count:
-            self.get_logger().warn(
-                "release_waypoint_count is smaller than switch_waypoint_count; "
-                "using switch_waypoint_count")
-            self._release_waypoint_count = self._switch_waypoint_count
-
         self._odom: Optional[Odometry] = None
         self._trajectory: Optional[Trajectory] = None
         self._vehicles: List[Tuple[str, float, float]] = []
         self._last_v2x_time = None
         self._use_mpc = False
+        self._mpc_target_vehicle_id: Optional[str] = None
         self._last_pp_cmd: Optional[AckermannControlCommand] = None
         self._last_mpc_cmd: Optional[AckermannControlCommand] = None
         self._stuck_since = None
@@ -172,8 +167,8 @@ class ControlCmdMux(Node):
 
         self.get_logger().info(
             f"Control mux started: PP='{pp_topic}', MPC='{mpc_topic}', output='{output_topic}', "
-            f"switch={self._switch_waypoint_count} wp, "
-            f"release={self._release_waypoint_count} wp")
+            f"switch when vehicle ahead <= {self._switch_waypoint_count} wp, "
+            f"release after ego leads by >= {self._release_waypoint_count} wp")
 
     def _pp_cmd_callback(self, msg: AckermannControlCommand) -> None:
         self._last_pp_cmd = msg
@@ -242,6 +237,7 @@ class ControlCmdMux(Node):
         age = (self.get_clock().now() - self._last_v2x_time).nanoseconds * 1e-9
         if age > self._v2x_stale_timeout:
             self._vehicles = []
+            self._mpc_target_vehicle_id = None
             self._set_mode(False, "V2X timeout")
 
     def _update_stuck_detection(self) -> None:
@@ -553,49 +549,82 @@ class ControlCmdMux(Node):
 
         ego_x = float(self._odom.pose.pose.position.x)
         ego_y = float(self._odom.pose.pose.position.y)
-        nearest = self._nearest_vehicle_waypoint_distance(ego_x, ego_y)
-        if nearest is None:
+        relations = self._vehicle_waypoint_relations(ego_x, ego_y)
+        if not relations:
+            self._mpc_target_vehicle_id = None
             self._set_mode(False, "no nearby V2X vehicles")
             return
 
-        vehicle_id, waypoint_distance = nearest
-        threshold = (
-            self._release_waypoint_count if self._use_mpc else self._switch_waypoint_count
+        switch_candidate = min(
+            (
+                relation for relation in relations
+                if relation[1] <= self._switch_waypoint_count
+            ),
+            key=lambda relation: relation[1],
+            default=None,
         )
-        self._set_mode(
-            waypoint_distance <= threshold,
-            f"nearest vehicle '{vehicle_id}' at {waypoint_distance} waypoints")
+        if switch_candidate is not None:
+            vehicle_id, vehicle_ahead_distance, _ego_ahead_distance = switch_candidate
+            self._mpc_target_vehicle_id = vehicle_id
+            self._set_mode(
+                True,
+                f"vehicle '{vehicle_id}' is {vehicle_ahead_distance} waypoints ahead")
+            return
 
-    def _nearest_vehicle_waypoint_distance(
+        if self._use_mpc and self._mpc_target_vehicle_id:
+            target = next(
+                (
+                    relation for relation in relations
+                    if relation[0] == self._mpc_target_vehicle_id
+                ),
+                None,
+            )
+            if target is not None:
+                vehicle_id, _vehicle_ahead_distance, ego_ahead_distance = target
+                if ego_ahead_distance < self._release_waypoint_count:
+                    return
+                self._mpc_target_vehicle_id = None
+                self._set_mode(
+                    False,
+                    f"ego passed vehicle '{vehicle_id}' by {ego_ahead_distance} waypoints")
+                return
+
+        self._mpc_target_vehicle_id = None
+        self._set_mode(False, "no vehicle within switch range")
+
+    def _vehicle_waypoint_relations(
         self, ego_x: float, ego_y: float
-    ) -> Optional[Tuple[str, int]]:
+    ) -> List[Tuple[str, int, int]]:
         if self._trajectory is None:
-            return None
+            return []
 
         points = self._trajectory.points
         waypoint_count = len(points)
         if waypoint_count == 0:
-            return None
+            return []
 
         ego_idx = nearest_waypoint_index(points, ego_x, ego_y)
         if ego_idx is None:
-            return None
+            return []
 
-        nearest: Optional[Tuple[str, int]] = None
+        relations: List[Tuple[str, int, int]] = []
         for vehicle_id, x, y in self._vehicles:
             vehicle_idx = nearest_waypoint_index(points, x, y)
             if vehicle_idx is None:
                 continue
-            waypoint_distance = circular_waypoint_distance(
+            vehicle_ahead_distance = forward_waypoint_distance(
                 ego_idx, vehicle_idx, waypoint_count)
-            if nearest is None or waypoint_distance < nearest[1]:
-                nearest = (vehicle_id, waypoint_distance)
-        return nearest
+            ego_ahead_distance = forward_waypoint_distance(
+                vehicle_idx, ego_idx, waypoint_count)
+            relations.append((vehicle_id, vehicle_ahead_distance, ego_ahead_distance))
+        return relations
 
     def _set_mode(self, use_mpc: bool, reason: str) -> None:
         if use_mpc == self._use_mpc:
             return
         self._use_mpc = use_mpc
+        if not use_mpc:
+            self._mpc_target_vehicle_id = None
         mode = "MPC" if use_mpc else "Pure Pursuit"
         self.get_logger().info(f"Switched to {mode}: {reason}")
 

@@ -46,6 +46,13 @@ def circular_waypoint_distance(index_a: int, index_b: int, waypoint_count: int) 
     return min(diff, waypoint_count - diff)
 
 
+def forward_waypoint_distance(from_index: int, to_index: int, waypoint_count: int) -> int:
+    """Return how many waypoints ahead ``to_index`` is from ``from_index``."""
+    if waypoint_count <= 0:
+        raise ValueError("waypoint_count must be positive")
+    return ((to_index % waypoint_count) - (from_index % waypoint_count)) % waypoint_count
+
+
 class V2XVehicleTracker:
     """Tracks the latest two samples per ``vehicle_id`` and exposes
     constant-velocity predictions over a caller-provided time grid."""

@@ -42,9 +42,8 @@ def nearest_waypoint_index(points, x: float, y: float):
     return nearest_idx
 
 
-def circular_waypoint_distance(index_a: int, index_b: int, waypoint_count: int) -> int:
-    diff = abs((index_a % waypoint_count) - (index_b % waypoint_count))
-    return min(diff, waypoint_count - diff)
+def forward_waypoint_distance(from_index: int, to_index: int, waypoint_count: int) -> int:
+    return ((to_index % waypoint_count) - (from_index % waypoint_count)) % waypoint_count
 
 
 def default_ego_vehicle_id() -> str:
@@ -66,8 +65,8 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
         self.declare_parameter("ego_vehicle_id", default_ego_vehicle_id())
         self.declare_parameter("kinematics_topic", "/localization/kinematic_state")
         self.declare_parameter("trajectory_topic", "/planning/scenario_planning/trajectory")
-        self.declare_parameter("switch_waypoint_count", 12)
-        self.declare_parameter("release_waypoint_count", 16)
+        self.declare_parameter("switch_waypoint_count", 6)
+        self.declare_parameter("release_waypoint_count", 4)
         self.declare_parameter("label_frame_id", "map")
         self.declare_parameter("label_origin_x", 0.0)
         self.declare_parameter("label_origin_y", 0.0)
@@ -88,8 +87,6 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
         trajectory_topic = str(self.get_parameter("trajectory_topic").value)
         self._switch_waypoint_count = int(self.get_parameter("switch_waypoint_count").value)
         self._release_waypoint_count = int(self.get_parameter("release_waypoint_count").value)
-        if self._release_waypoint_count < self._switch_waypoint_count:
-            self._release_waypoint_count = self._switch_waypoint_count
         self._label_frame_id = self.get_parameter(
             "label_frame_id").get_parameter_value().string_value
         self._label_origin_x = self.get_parameter(
@@ -103,6 +100,7 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
         self._label_scale = self.get_parameter(
             "label_scale").get_parameter_value().double_value
         self._mode_by_vehicle = {}
+        self._mode_target_by_vehicle = {}
         self._active_vehicle_ids = set()
         self._odom = None
         self._trajectory = None
@@ -163,23 +161,38 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
             if vehicle_idx is None:
                 continue
 
-            nearest_waypoint_distance = math.inf
+            switch_candidate = None
+            current_target = self._mode_target_by_vehicle.get(vehicle_id)
+            target_relation = None
             for other_id, (other_x, other_y) in positions.items():
                 if other_id == vehicle_id:
                     continue
                 other_idx = nearest_waypoint_index(self._trajectory.points, other_x, other_y)
                 if other_idx is None:
                     continue
-                nearest_waypoint_distance = min(
-                    nearest_waypoint_distance,
-                    circular_waypoint_distance(
-                        vehicle_idx, other_idx, len(self._trajectory.points)))
+                other_ahead_distance = forward_waypoint_distance(
+                    vehicle_idx, other_idx, len(self._trajectory.points))
+                vehicle_ahead_distance = forward_waypoint_distance(
+                    other_idx, vehicle_idx, len(self._trajectory.points))
+                relation = (other_id, other_ahead_distance, vehicle_ahead_distance)
+                if other_ahead_distance <= self._switch_waypoint_count:
+                    if switch_candidate is None or other_ahead_distance < switch_candidate[1]:
+                        switch_candidate = relation
+                if other_id == current_target:
+                    target_relation = relation
 
-            current_mode = self._mode_by_vehicle.get(vehicle_id, MODE_PP)
-            threshold = (self._release_waypoint_count
-                         if current_mode == MODE_MPC else self._switch_waypoint_count)
-            next_mode = MODE_MPC if nearest_waypoint_distance <= threshold else MODE_PP
-            self._mode_by_vehicle[vehicle_id] = next_mode
+            if switch_candidate is not None:
+                other_id, _other_ahead_distance, _vehicle_ahead_distance = switch_candidate
+                self._mode_target_by_vehicle[vehicle_id] = other_id
+                self._mode_by_vehicle[vehicle_id] = MODE_MPC
+                continue
+
+            if self._mode_by_vehicle.get(vehicle_id, MODE_PP) == MODE_MPC:
+                if target_relation is not None and target_relation[2] < self._release_waypoint_count:
+                    continue
+                self._mode_target_by_vehicle.pop(vehicle_id, None)
+
+            self._mode_by_vehicle[vehicle_id] = MODE_PP
 
     def _vehicle_positions(self, msg: V2XVehiclePositionArray) -> dict:
         positions = {
