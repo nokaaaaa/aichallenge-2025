@@ -18,9 +18,11 @@
 #include <geometry_msgs/msg/quaternion.hpp>
 #include <filesystem>
 #include <fstream>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <sstream>
+#include <algorithm>
 
 using Trajectory = autoware_auto_planning_msgs::msg::Trajectory;
 using TrajectoryPoint = autoware_auto_planning_msgs::msg::TrajectoryPoint;
@@ -37,6 +39,7 @@ public:
 
 
     declare_parameter("csv_path", "");
+    interpolation_factor_ = declare_parameter<int>("interpolation_factor", 5);
     z_= declare_parameter<float>("z");
     std::string csv_path = get_parameter("csv_path").as_string();
     
@@ -49,8 +52,11 @@ public:
       RCLCPP_ERROR(get_logger(), "Failed to load CSV file: %s", csv_path.c_str());
       return;
     }
+    current_csv_path_ = csv_path;
     
-    RCLCPP_INFO(get_logger(), "Loaded trajectory from CSV with %zu points", csv_trajectory_.points.size());
+    RCLCPP_INFO(
+      get_logger(), "Loaded trajectory from CSV with %zu points",
+      csv_trajectory_.points.size());
 
     timer_ = rclcpp::create_timer(
       this, get_clock(), std::chrono::seconds(1),
@@ -72,7 +78,7 @@ private:
     csv_trajectory_.header.stamp = this->now();
     csv_trajectory_.header.frame_id = "map";
 
-    csv_trajectory_.points.clear();
+    std::vector<TrajectoryPoint> loaded_points;
     
     while (std::getline(file, line)) {
       std::stringstream ss(line);
@@ -104,10 +110,89 @@ private:
       point.acceleration_mps2 = 0.0;
       point.heading_rate_rps = 0.0;
       
-      csv_trajectory_.points.push_back(point);
+      loaded_points.push_back(point);
     }
     
+    csv_trajectory_.points.clear();
+    const auto interpolated_points = interpolateTrajectory(loaded_points);
+    for (const auto & point : interpolated_points) {
+      csv_trajectory_.points.push_back(point);
+    }
     return !csv_trajectory_.points.empty();
+  }
+
+  std::vector<TrajectoryPoint> interpolateTrajectory(
+    const std::vector<TrajectoryPoint> & points) const
+  {
+    if (points.size() < 2 || interpolation_factor_ <= 1) {
+      return points;
+    }
+
+    const int factor = std::max(1, interpolation_factor_);
+    std::vector<TrajectoryPoint> interpolated;
+    interpolated.reserve(points.size() * factor);
+
+    for (size_t i = 0; i < points.size(); ++i) {
+      const auto & start = points[i];
+      const auto & end = points[(i + 1) % points.size()];
+      for (int step = 0; step < factor; ++step) {
+        const double ratio = static_cast<double>(step) / static_cast<double>(factor);
+        interpolated.push_back(interpolatePoint(start, end, ratio));
+      }
+    }
+
+    return interpolated;
+  }
+
+  TrajectoryPoint interpolatePoint(
+    const TrajectoryPoint & start, const TrajectoryPoint & end, const double ratio) const
+  {
+    TrajectoryPoint point = start;
+    point.pose.position.x = lerp(start.pose.position.x, end.pose.position.x, ratio);
+    point.pose.position.y = lerp(start.pose.position.y, end.pose.position.y, ratio);
+    point.pose.position.z = z_;
+    point.pose.orientation = interpolateYaw(start.pose.orientation, end.pose.orientation, ratio);
+    point.longitudinal_velocity_mps = lerp(
+      start.longitudinal_velocity_mps, end.longitudinal_velocity_mps, ratio);
+    point.lateral_velocity_mps = lerp(
+      start.lateral_velocity_mps, end.lateral_velocity_mps, ratio);
+    point.acceleration_mps2 = lerp(start.acceleration_mps2, end.acceleration_mps2, ratio);
+    point.heading_rate_rps = lerp(start.heading_rate_rps, end.heading_rate_rps, ratio);
+    return point;
+  }
+
+  static double lerp(const double start, const double end, const double ratio)
+  {
+    return start + (end - start) * ratio;
+  }
+
+  static geometry_msgs::msg::Quaternion interpolateYaw(
+    const geometry_msgs::msg::Quaternion & start,
+    const geometry_msgs::msg::Quaternion & end,
+    const double ratio)
+  {
+    const double start_yaw = yawFromQuaternion(start);
+    const double end_yaw = yawFromQuaternion(end);
+    const double yaw =
+      start_yaw + normalizeAngle(end_yaw - start_yaw) * ratio;
+    geometry_msgs::msg::Quaternion q;
+    q.x = 0.0;
+    q.y = 0.0;
+    q.z = std::sin(yaw * 0.5);
+    q.w = std::cos(yaw * 0.5);
+    return q;
+  }
+
+  static double yawFromQuaternion(const geometry_msgs::msg::Quaternion & q)
+  {
+    const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+    const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    return std::atan2(siny_cosp, cosy_cosp);
+  }
+
+  static double normalizeAngle(const double angle)
+  {
+    return std::atan2(std::sin(angle), std::cos(angle));
   }
   
   void publish_trajectory()
@@ -170,6 +255,27 @@ private:
           result.successful = false;
           result.reason = "Invalid type for z parameter.";
         }
+      } else if (param.get_name() == "interpolation_factor") {
+        if (param.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER) {
+          const int new_factor = param.as_int();
+          if (new_factor < 1) {
+            RCLCPP_WARN(get_logger(), "Parameter 'interpolation_factor' must be >= 1.");
+            result.successful = false;
+            result.reason = "Invalid interpolation_factor.";
+            continue;
+          }
+          interpolation_factor_ = new_factor;
+          if (!current_csv_path_.empty() && loadCSVTrajectory(current_csv_path_)) {
+            RCLCPP_INFO(
+              get_logger(), "interpolation_factor changed to %d, trajectory now has %zu points",
+              interpolation_factor_, csv_trajectory_.points.size());
+          }
+        } else {
+          RCLCPP_WARN(
+            get_logger(), "Parameter 'interpolation_factor' received with wrong type. Expected integer.");
+          result.successful = false;
+          result.reason = "Invalid type for interpolation_factor parameter.";
+        }
       }
     }
     return result;
@@ -179,6 +285,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   Trajectory csv_trajectory_;
   float z_;
+  int interpolation_factor_;
   std::string current_csv_path_;
   OnSetParametersCallbackHandle::SharedPtr set_parameter_callback_handle_;
 };

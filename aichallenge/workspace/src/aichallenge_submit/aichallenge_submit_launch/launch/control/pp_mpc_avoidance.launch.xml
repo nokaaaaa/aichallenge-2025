@@ -3,8 +3,8 @@
   <arg name="simulation" default="true"/>
   <arg name="use_sim_time" default="true"/>
   <arg name="track" default="citycircuit"/>
-  <arg name="switch_waypoint_count" default="6"/>
-  <arg name="release_waypoint_count" default="1"/>
+  <arg name="switch_waypoint_count" default="30"/>
+  <arg name="release_waypoint_count" default="5"/>
   <arg name="v2x_stale_timeout" default="0.5"/>
   <arg name="ego_vehicle_id" default="$(env VEHICLE_ID default)"/>
   <arg name="enable_recovery" default="true"/>
@@ -46,8 +46,8 @@
     <param name="v2x_topic" value="/v2x/vehicle_positions"/>
     <param name="ego_vehicle_id" value="$(var ego_vehicle_id)"/>
     <param name="wheel_base" value="1.087"/>
-    <param name="lookahead_waypoints" value="6"/>
-    <param name="vehicle_search_waypoints" value="12"/>
+    <param name="lookahead_waypoints" value="30"/>
+    <param name="vehicle_search_waypoints" value="60"/>
     <param name="overtake_offset" value="2.0"/>
     <param name="default_overtake_side" value="right"/>
     <param name="target_speed" value="8.333333333333334"/>
