@@ -1,7 +1,7 @@
 # make file inspired by https://roborovsky-racers.github.io/RoborovskyNote/
 SHELL := /bin/bash
 
-.PHONY: autoware-build autoware-vehicle autoware-simulator autoware-request-initialpose autoware-request-control  awsim-request-start awsim-request-reset autoware-driver-zenoh autoware-driver-zenoh-rosbag setup-vehicle \
+.PHONY: autoware-build autoware-vehicle autoware-simulator autoware-simulator-pp-mpc autoware-request-initialpose autoware-request-control  awsim-request-start awsim-request-reset autoware-driver-zenoh autoware-driver-zenoh-rosbag setup-vehicle \
 	simulator dev dev2 dev3 dev4 driver zenoh download rviz2 down down_all ps autoware-attach autoware-bash eval e2e
 
 # Used by docker-compose.yml for build/eval artifact ownership.
@@ -42,6 +42,11 @@ autoware-simulator:
 	@echo "Log dir: .$(LOG_DIR)"
 	LOG_DIR=$(LOG_DIR) RUN_MODE=awsim docker compose up -d autoware
 
+autoware-simulator-pp-mpc:
+	@echo "Start Autoware for AWSIM"
+	@echo "Log dir: .$(LOG_DIR)"
+	LOG_DIR=$(LOG_DIR) RUN_MODE=awsim CONTROL_METHOD=pp_mpc_avoidance docker compose up -d autoware
+
 # autoware command service use ROS_DOMAIN_ID from .env
 autoware-request-initialpose:
 	CMD="ros2 service call /set_initial_pose std_srvs/srv/Trigger '{}'" docker compose run --rm --no-deps autoware-command
@@ -71,7 +76,7 @@ zenoh:
 	docker compose up -d zenoh
 
 dev: SIM_MODE := dev
-dev: simulator autoware-simulator
+dev: simulator autoware-simulator-pp-mpc
 	@echo "Start dev simulation (AWSIM + Autoware)"
 	@echo "To stop: make down  (docker compose down --remove-orphans)"
 

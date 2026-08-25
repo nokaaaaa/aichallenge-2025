@@ -120,9 +120,12 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
             MarkerArray, "/v2x/vehicle_positions/markers", 1)
         self.mode_summary_pub = self.create_publisher(
             String, "/v2x/vehicle_modes/text", 1)
+        self.create_timer(0.5, self._publish_mode_summary_timer)
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
+        if self._ego_vehicle_id:
+            self._active_vehicle_ids.add(self._ego_vehicle_id)
 
     def _trajectory_callback(self, msg: Trajectory) -> None:
         self._trajectory = msg
@@ -219,8 +222,15 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
     def _summary_vehicle_ids(self, vehicles) -> list:
         configured_ids = list(self._vehicle_ids)
         observed_ids = sorted(vehicle.vehicle_id for vehicle in vehicles)
+        if self._ego_vehicle_id and self._ego_vehicle_id not in configured_ids:
+            configured_ids.insert(0, self._ego_vehicle_id)
         extra_ids = [vehicle_id for vehicle_id in observed_ids if vehicle_id not in configured_ids]
         return configured_ids + extra_ids
+
+    def _publish_mode_summary_timer(self) -> None:
+        if not self._publish_mode_summary:
+            return
+        self._publish_mode_summary_text([])
 
     def _summary_mode(self, vehicle_id: str) -> str:
         if vehicle_id not in self._active_vehicle_ids:
