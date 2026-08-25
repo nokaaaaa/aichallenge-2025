@@ -24,7 +24,7 @@ SPHERE_DIAMETER = 1.5
 ALPHA = 0.9
 LIFETIME_SEC = 1
 MODE_PP = "Pure Pursuit"
-MODE_MPC = "MPC"
+MODE_OVERTAKE = "Overtake"
 MODE_NO_DATA = "No data"
 DEFAULT_VEHICLE_IDS = ["d1", "d2", "d3", "d4"]
 
@@ -187,10 +187,10 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
             if switch_candidate is not None:
                 other_id, _other_ahead_distance, _vehicle_ahead_distance = switch_candidate
                 self._mode_target_by_vehicle[vehicle_id] = other_id
-                self._mode_by_vehicle[vehicle_id] = MODE_MPC
+                self._mode_by_vehicle[vehicle_id] = MODE_OVERTAKE
                 continue
 
-            if self._mode_by_vehicle.get(vehicle_id, MODE_PP) == MODE_MPC:
+            if self._mode_by_vehicle.get(vehicle_id, MODE_PP) == MODE_OVERTAKE:
                 if target_relation is not None and target_relation[2] < self._release_waypoint_count:
                     continue
                 self._mode_target_by_vehicle.pop(vehicle_id, None)
@@ -279,7 +279,7 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
 
     @staticmethod
     def _mode_color(mode: str) -> ColorRGBA:
-        if mode == MODE_MPC:
+        if mode == MODE_OVERTAKE:
             return ColorRGBA(r=0.0, g=1.0, b=1.0, a=1.0)
         return ColorRGBA(r=1.0, g=1.0, b=1.0, a=1.0)
 

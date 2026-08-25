@@ -38,13 +38,20 @@
     <arg name="control_cmd_topic" value="/control/command/pure_pursuit_cmd"/>
   </include>
 
-  <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/mpc.launch.xml">
-    <arg name="use_sim_time" value="$(var use_sim_time)"/>
-    <arg name="track" value="$(var track)"/>
-    <arg name="use_obstacle_avoidance" value="true"/>
-    <arg name="control_cmd_topic" value="/control/command/mpc_cmd"/>
-    <arg name="raw_control_cmd_topic" value="/control/command/mpc_cmd_raw"/>
-  </include>
+  <node pkg="multi_purpose_mpc_ros" exec="simple_overtake_controller" name="simple_overtake_controller" output="screen">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="output_cmd_topic" value="/control/command/mpc_cmd"/>
+    <param name="kinematics_topic" value="/localization/kinematic_state"/>
+    <param name="trajectory_topic" value="/planning/scenario_planning/trajectory"/>
+    <param name="v2x_topic" value="/v2x/vehicle_positions"/>
+    <param name="ego_vehicle_id" value="$(var ego_vehicle_id)"/>
+    <param name="wheel_base" value="1.087"/>
+    <param name="lookahead_waypoints" value="6"/>
+    <param name="vehicle_search_waypoints" value="12"/>
+    <param name="overtake_offset" value="2.0"/>
+    <param name="default_overtake_side" value="right"/>
+    <param name="target_speed" value="8.333333333333334"/>
+  </node>
 
   <node pkg="multi_purpose_mpc_ros" exec="control_cmd_mux" name="control_cmd_mux" output="screen">
     <param name="use_sim_time" value="$(var use_sim_time)"/>
