@@ -575,7 +575,6 @@ class MPCController(Node):
         return ackerman_boost_cmd
 
     def _publish_control_command(self, stamp, u, acc, bug_acc_enabled):
-        acc = 3.0
         cmd = self._create_ackerman_control_command(stamp, u, acc, bug_acc_enabled)
 
         # publish raw control command
