@@ -17,6 +17,11 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Int32
 from v2x_msgs.msg import V2XVehiclePositionArray
 
+from multi_purpose_mpc_ros.v2x_vehicle_tracker import (
+    circular_waypoint_distance,
+    nearest_waypoint_index,
+)
+
 
 class RecoveryState(Enum):
     IDLE = "idle"
@@ -40,8 +45,8 @@ class ControlCmdMux(Node):
         self.declare_parameter("trajectory_topic", "/planning/scenario_planning/trajectory")
         self.declare_parameter("v2x_topic", "/v2x/vehicle_positions")
         self.declare_parameter("ego_vehicle_id", os.environ.get("VEHICLE_ID", ""))
-        self.declare_parameter("switch_distance", 12.0)
-        self.declare_parameter("release_distance", 16.0)
+        self.declare_parameter("switch_waypoint_count", 12)
+        self.declare_parameter("release_waypoint_count", 16)
         self.declare_parameter("v2x_stale_timeout", 0.5)
         self.declare_parameter("enable_recovery", True)
         self.declare_parameter("condition_topic", "/aichallenge/pitstop/condition")
@@ -80,8 +85,8 @@ class ControlCmdMux(Node):
         condition_topic = str(self.get_parameter("condition_topic").value)
 
         self._ego_vehicle_id = str(self.get_parameter("ego_vehicle_id").value)
-        self._switch_distance = float(self.get_parameter("switch_distance").value)
-        self._release_distance = float(self.get_parameter("release_distance").value)
+        self._switch_waypoint_count = int(self.get_parameter("switch_waypoint_count").value)
+        self._release_waypoint_count = int(self.get_parameter("release_waypoint_count").value)
         self._v2x_stale_timeout = float(self.get_parameter("v2x_stale_timeout").value)
         self._enable_recovery = bool(self.get_parameter("enable_recovery").value)
         self._condition_jump_threshold = float(self.get_parameter("condition_jump_threshold").value)
@@ -122,10 +127,11 @@ class ControlCmdMux(Node):
             self.get_parameter("recovery_path_approach_distance").value)
         self._recovery_cooldown = float(self.get_parameter("recovery_cooldown").value)
 
-        if self._release_distance < self._switch_distance:
+        if self._release_waypoint_count < self._switch_waypoint_count:
             self.get_logger().warn(
-                "release_distance is smaller than switch_distance; using switch_distance")
-            self._release_distance = self._switch_distance
+                "release_waypoint_count is smaller than switch_waypoint_count; "
+                "using switch_waypoint_count")
+            self._release_waypoint_count = self._switch_waypoint_count
 
         self._odom: Optional[Odometry] = None
         self._trajectory: Optional[Trajectory] = None
@@ -166,7 +172,8 @@ class ControlCmdMux(Node):
 
         self.get_logger().info(
             f"Control mux started: PP='{pp_topic}', MPC='{mpc_topic}', output='{output_topic}', "
-            f"switch={self._switch_distance:.1f}m, release={self._release_distance:.1f}m")
+            f"switch={self._switch_waypoint_count} wp, "
+            f"release={self._release_waypoint_count} wp")
 
     def _pp_cmd_callback(self, msg: AckermannControlCommand) -> None:
         self._last_pp_cmd = msg
@@ -541,26 +548,48 @@ class ControlCmdMux(Node):
     def _update_mode(self) -> None:
         if self._odom is None:
             return
+        if self._trajectory is None or not self._trajectory.points:
+            return
 
         ego_x = float(self._odom.pose.pose.position.x)
         ego_y = float(self._odom.pose.pose.position.y)
-        nearest = self._nearest_vehicle_distance(ego_x, ego_y)
+        nearest = self._nearest_vehicle_waypoint_distance(ego_x, ego_y)
         if nearest is None:
             self._set_mode(False, "no nearby V2X vehicles")
             return
 
-        vehicle_id, distance = nearest
-        threshold = self._release_distance if self._use_mpc else self._switch_distance
+        vehicle_id, waypoint_distance = nearest
+        threshold = (
+            self._release_waypoint_count if self._use_mpc else self._switch_waypoint_count
+        )
         self._set_mode(
-            distance <= threshold,
-            f"nearest vehicle '{vehicle_id}' at {distance:.2f} m")
+            waypoint_distance <= threshold,
+            f"nearest vehicle '{vehicle_id}' at {waypoint_distance} waypoints")
 
-    def _nearest_vehicle_distance(self, ego_x: float, ego_y: float) -> Optional[Tuple[str, float]]:
-        nearest: Optional[Tuple[str, float]] = None
+    def _nearest_vehicle_waypoint_distance(
+        self, ego_x: float, ego_y: float
+    ) -> Optional[Tuple[str, int]]:
+        if self._trajectory is None:
+            return None
+
+        points = self._trajectory.points
+        waypoint_count = len(points)
+        if waypoint_count == 0:
+            return None
+
+        ego_idx = nearest_waypoint_index(points, ego_x, ego_y)
+        if ego_idx is None:
+            return None
+
+        nearest: Optional[Tuple[str, int]] = None
         for vehicle_id, x, y in self._vehicles:
-            distance = math.hypot(x - ego_x, y - ego_y)
-            if nearest is None or distance < nearest[1]:
-                nearest = (vehicle_id, distance)
+            vehicle_idx = nearest_waypoint_index(points, x, y)
+            if vehicle_idx is None:
+                continue
+            waypoint_distance = circular_waypoint_distance(
+                ego_idx, vehicle_idx, waypoint_count)
+            if nearest is None or waypoint_distance < nearest[1]:
+                nearest = (vehicle_id, waypoint_distance)
         return nearest
 
     def _set_mode(self, use_mpc: bool, reason: str) -> None:

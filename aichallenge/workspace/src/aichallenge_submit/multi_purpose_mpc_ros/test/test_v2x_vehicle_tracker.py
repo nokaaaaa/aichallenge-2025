@@ -209,3 +209,19 @@ def test_warn_callback_optional_default_is_silent():
     tracker.update(_msg(0.1, [("d2", 100.0, 0.0)]))  # would warn if a callback existed
 
     assert tracker.velocity("d2") == (0.0, 0.0)  # clamp still fires
+
+
+def test_nearest_waypoint_index_uses_vehicle_position():
+    from multi_purpose_mpc_ros.v2x_vehicle_tracker import nearest_waypoint_index
+
+    waypoints = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)]
+
+    assert nearest_waypoint_index(waypoints, 11.0, 2.0) == 1
+
+
+def test_circular_waypoint_distance_wraps_around_track_end():
+    from multi_purpose_mpc_ros.v2x_vehicle_tracker import circular_waypoint_distance
+
+    assert circular_waypoint_distance(98, 2, 100) == 4
+    assert circular_waypoint_distance(2, 98, 100) == 4
+    assert circular_waypoint_distance(20, 30, 100) == 10

@@ -3,8 +3,8 @@
   <arg name="simulation" default="true"/>
   <arg name="use_sim_time" default="true"/>
   <arg name="track" default="citycircuit"/>
-  <arg name="switch_distance" default="12.0"/>
-  <arg name="release_distance" default="16.0"/>
+  <arg name="switch_waypoint_count" default="12"/>
+  <arg name="release_waypoint_count" default="16"/>
   <arg name="v2x_stale_timeout" default="0.5"/>
   <arg name="ego_vehicle_id" default="$(env VEHICLE_ID default)"/>
   <arg name="enable_recovery" default="true"/>
@@ -56,8 +56,8 @@
     <param name="trajectory_topic" value="/planning/scenario_planning/trajectory"/>
     <param name="v2x_topic" value="/v2x/vehicle_positions"/>
     <param name="ego_vehicle_id" value="$(var ego_vehicle_id)"/>
-    <param name="switch_distance" value="$(var switch_distance)"/>
-    <param name="release_distance" value="$(var release_distance)"/>
+    <param name="switch_waypoint_count" value="$(var switch_waypoint_count)"/>
+    <param name="release_waypoint_count" value="$(var release_waypoint_count)"/>
     <param name="v2x_stale_timeout" value="$(var v2x_stale_timeout)"/>
     <param name="enable_recovery" value="$(var enable_recovery)"/>
     <param name="stuck_speed_threshold" value="$(var stuck_speed_threshold)"/>

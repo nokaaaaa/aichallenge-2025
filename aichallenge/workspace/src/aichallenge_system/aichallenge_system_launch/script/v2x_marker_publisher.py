@@ -4,8 +4,10 @@ import os
 
 import rclpy
 import rclpy.node
+from autoware_auto_planning_msgs.msg import Trajectory
 from builtin_interfaces.msg import Duration
 from nav_msgs.msg import Odometry
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import ColorRGBA, String
 from visualization_msgs.msg import Marker, MarkerArray
 from v2x_msgs.msg import V2XVehiclePositionArray
@@ -27,6 +29,24 @@ MODE_NO_DATA = "No data"
 DEFAULT_VEHICLE_IDS = ["d1", "d2", "d3", "d4"]
 
 
+def nearest_waypoint_index(points, x: float, y: float):
+    nearest_idx = None
+    nearest_dist_sq = math.inf
+    for idx, point in enumerate(points):
+        px = float(point.pose.position.x)
+        py = float(point.pose.position.y)
+        dist_sq = (px - x) ** 2 + (py - y) ** 2
+        if dist_sq < nearest_dist_sq:
+            nearest_idx = idx
+            nearest_dist_sq = dist_sq
+    return nearest_idx
+
+
+def circular_waypoint_distance(index_a: int, index_b: int, waypoint_count: int) -> int:
+    diff = abs((index_a % waypoint_count) - (index_b % waypoint_count))
+    return min(diff, waypoint_count - diff)
+
+
 def default_ego_vehicle_id() -> str:
     vehicle_id = os.environ.get("VEHICLE_ID", "").strip()
     if vehicle_id:
@@ -45,8 +65,9 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
         self.declare_parameter("vehicle_ids", DEFAULT_VEHICLE_IDS)
         self.declare_parameter("ego_vehicle_id", default_ego_vehicle_id())
         self.declare_parameter("kinematics_topic", "/localization/kinematic_state")
-        self.declare_parameter("switch_distance", 12.0)
-        self.declare_parameter("release_distance", 16.0)
+        self.declare_parameter("trajectory_topic", "/planning/scenario_planning/trajectory")
+        self.declare_parameter("switch_waypoint_count", 12)
+        self.declare_parameter("release_waypoint_count", 16)
         self.declare_parameter("label_frame_id", "map")
         self.declare_parameter("label_origin_x", 0.0)
         self.declare_parameter("label_origin_y", 0.0)
@@ -64,10 +85,11 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
             self._vehicle_ids = DEFAULT_VEHICLE_IDS
         self._ego_vehicle_id = str(self.get_parameter("ego_vehicle_id").value)
         kinematics_topic = str(self.get_parameter("kinematics_topic").value)
-        self._switch_distance = self.get_parameter(
-            "switch_distance").get_parameter_value().double_value
-        self._release_distance = self.get_parameter(
-            "release_distance").get_parameter_value().double_value
+        trajectory_topic = str(self.get_parameter("trajectory_topic").value)
+        self._switch_waypoint_count = int(self.get_parameter("switch_waypoint_count").value)
+        self._release_waypoint_count = int(self.get_parameter("release_waypoint_count").value)
+        if self._release_waypoint_count < self._switch_waypoint_count:
+            self._release_waypoint_count = self._switch_waypoint_count
         self._label_frame_id = self.get_parameter(
             "label_frame_id").get_parameter_value().string_value
         self._label_origin_x = self.get_parameter(
@@ -83,11 +105,19 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
         self._mode_by_vehicle = {}
         self._active_vehicle_ids = set()
         self._odom = None
+        self._trajectory = None
 
         self.sub = self.create_subscription(
             V2XVehiclePositionArray, "/v2x/vehicle_positions", self.callback, 1)
         self.odom_sub = self.create_subscription(
             Odometry, kinematics_topic, self._odom_callback, 1)
+        trajectory_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.trajectory_sub = self.create_subscription(
+            Trajectory, trajectory_topic, self._trajectory_callback, trajectory_qos)
         self.pub = self.create_publisher(
             MarkerArray, "/v2x/vehicle_positions/markers", 1)
         self.mode_summary_pub = self.create_publisher(
@@ -95,6 +125,9 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
+
+    def _trajectory_callback(self, msg: Trajectory) -> None:
+        self._trajectory = msg
 
     def callback(self, msg: V2XVehiclePositionArray) -> None:
         markers = MarkerArray()
@@ -122,19 +155,30 @@ class V2XMarkerPublisherNode(rclpy.node.Node):
     def _update_modes(self, msg: V2XVehiclePositionArray) -> None:
         positions = self._vehicle_positions(msg)
         self._active_vehicle_ids = set(positions.keys())
+        if self._trajectory is None or not self._trajectory.points:
+            return
 
         for vehicle_id, (x, y) in positions.items():
-            nearest_distance = math.inf
+            vehicle_idx = nearest_waypoint_index(self._trajectory.points, x, y)
+            if vehicle_idx is None:
+                continue
+
+            nearest_waypoint_distance = math.inf
             for other_id, (other_x, other_y) in positions.items():
                 if other_id == vehicle_id:
                     continue
-                nearest_distance = min(
-                    nearest_distance, math.hypot(other_x - x, other_y - y))
+                other_idx = nearest_waypoint_index(self._trajectory.points, other_x, other_y)
+                if other_idx is None:
+                    continue
+                nearest_waypoint_distance = min(
+                    nearest_waypoint_distance,
+                    circular_waypoint_distance(
+                        vehicle_idx, other_idx, len(self._trajectory.points)))
 
             current_mode = self._mode_by_vehicle.get(vehicle_id, MODE_PP)
-            threshold = (self._release_distance
-                         if current_mode == MODE_MPC else self._switch_distance)
-            next_mode = MODE_MPC if nearest_distance <= threshold else MODE_PP
+            threshold = (self._release_waypoint_count
+                         if current_mode == MODE_MPC else self._switch_waypoint_count)
+            next_mode = MODE_MPC if nearest_waypoint_distance <= threshold else MODE_PP
             self._mode_by_vehicle[vehicle_id] = next_mode
 
     def _vehicle_positions(self, msg: V2XVehiclePositionArray) -> dict:
