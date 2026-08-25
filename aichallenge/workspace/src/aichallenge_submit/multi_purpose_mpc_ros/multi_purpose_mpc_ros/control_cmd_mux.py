@@ -45,6 +45,7 @@ class ControlCmdMux(Node):
         self.declare_parameter("trajectory_topic", "/planning/scenario_planning/trajectory")
         self.declare_parameter("v2x_topic", "/v2x/vehicle_positions")
         self.declare_parameter("ego_vehicle_id", os.environ.get("VEHICLE_ID", ""))
+        self.declare_parameter("enabled_ego_vehicle_id", "P1")
         self.declare_parameter("switch_waypoint_count", 6)
         self.declare_parameter("release_waypoint_count", 1)
         self.declare_parameter("v2x_stale_timeout", 0.5)
@@ -85,6 +86,7 @@ class ControlCmdMux(Node):
         condition_topic = str(self.get_parameter("condition_topic").value)
 
         self._ego_vehicle_id = str(self.get_parameter("ego_vehicle_id").value)
+        self._enabled_ego_vehicle_id = str(self.get_parameter("enabled_ego_vehicle_id").value)
         self._switch_waypoint_count = int(self.get_parameter("switch_waypoint_count").value)
         self._release_waypoint_count = int(self.get_parameter("release_waypoint_count").value)
         self._v2x_stale_timeout = float(self.get_parameter("v2x_stale_timeout").value)
@@ -542,6 +544,10 @@ class ControlCmdMux(Node):
         return math.atan2(math.sin(angle), math.cos(angle))
 
     def _update_mode(self) -> None:
+        if self._enabled_ego_vehicle_id and self._ego_vehicle_id != self._enabled_ego_vehicle_id:
+            self._mpc_target_vehicle_id = None
+            self._set_mode(False, "costmap overtake is disabled for this ego vehicle")
+            return
         if self._odom is None:
             return
         if self._trajectory is None or not self._trajectory.points:

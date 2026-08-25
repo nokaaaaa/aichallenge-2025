@@ -7,6 +7,7 @@
   <arg name="release_waypoint_count" default="5"/>
   <arg name="v2x_stale_timeout" default="0.5"/>
   <arg name="ego_vehicle_id" default="$(env VEHICLE_ID default)"/>
+  <arg name="enabled_ego_vehicle_id" default="P1"/>
   <arg name="enable_recovery" default="true"/>
   <arg name="stuck_speed_threshold" default="0.2"/>
   <arg name="stuck_command_speed_threshold" default="1.0"/>
@@ -45,11 +46,16 @@
     <param name="trajectory_topic" value="/planning/scenario_planning/trajectory"/>
     <param name="v2x_topic" value="/v2x/vehicle_positions"/>
     <param name="ego_vehicle_id" value="$(var ego_vehicle_id)"/>
+    <param name="enabled_ego_vehicle_id" value="$(var enabled_ego_vehicle_id)"/>
+    <param name="map_yaml_path" value="env/final_ver3/occupancy_grid_map.yaml"/>
     <param name="wheel_base" value="1.087"/>
-    <param name="lookahead_waypoints" value="30"/>
+    <param name="lookahead_waypoints" value="6"/>
     <param name="vehicle_search_waypoints" value="60"/>
-    <param name="overtake_offset" value="2.0"/>
-    <param name="default_overtake_side" value="right"/>
+    <param name="planning_goal_waypoints" value="90"/>
+    <param name="planning_margin" value="4.0"/>
+    <param name="vehicle_wall_radius" value="1.25"/>
+    <param name="ego_collision_radius" value="0.85"/>
+    <param name="path_follow_cost" value="0.001"/>
     <param name="target_speed" value="8.333333333333334"/>
   </node>
 
@@ -63,6 +69,7 @@
     <param name="trajectory_topic" value="/planning/scenario_planning/trajectory"/>
     <param name="v2x_topic" value="/v2x/vehicle_positions"/>
     <param name="ego_vehicle_id" value="$(var ego_vehicle_id)"/>
+    <param name="enabled_ego_vehicle_id" value="$(var enabled_ego_vehicle_id)"/>
     <param name="switch_waypoint_count" value="$(var switch_waypoint_count)"/>
     <param name="release_waypoint_count" value="$(var release_waypoint_count)"/>
     <param name="v2x_stale_timeout" value="$(var v2x_stale_timeout)"/>
