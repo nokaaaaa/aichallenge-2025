@@ -38,6 +38,7 @@ install(PROGRAMS
   scripts/mpc_simulation
   scripts/obstacle_parser.py
   scripts/control_cmd_mux
+  scripts/lap_time_logger
   scripts/simple_overtake_controller
   scripts/path_constraints_provider
   scripts/publish_initialpose
