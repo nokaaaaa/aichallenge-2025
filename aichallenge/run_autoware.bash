@@ -24,6 +24,12 @@ case "${mode}" in
     ;;
 esac
 
+# Use the P1 RViz instance as the single main vehicle view. Other vehicle
+# instances remain available through V2X marker spheres.
+if [ "${id}" != "1" ]; then
+    opts[2]="run_rviz:=false"
+fi
+
 export ROS_DOMAIN_ID=$id
 
 if [ -n "${CONTROL_METHOD:-}" ]; then

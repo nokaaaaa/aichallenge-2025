@@ -297,7 +297,8 @@ Visualization Manager:
           Visibility:
             Control:
               MPC: true
-              PointStamped: true
+              MPC Reference Path: true
+              PointStamped: false
               Value: false
             Localization:
               Fusion: true
@@ -454,7 +455,7 @@ Visualization Manager:
         - Alpha: 0.5
           Class: rviz_default_plugins/PointStamped
           Color: 255; 255; 0
-          Enabled: true
+          Enabled: false
           History Length: 1
           Name: PointStamped
           Radius: 0.800000011920929
@@ -477,6 +478,19 @@ Visualization Manager:
             History Policy: Keep Last
             Reliability Policy: Reliable
             Value: /mpc/prediction
+          Value: true
+        - Class: rviz_default_plugins/MarkerArray
+          Enabled: true
+          Name: MPC Reference Path
+          Namespaces:
+            ref_path: true
+            ref_path_point: true
+          Topic:
+            Depth: 1
+            Durability Policy: Transient Local
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /mpc/ref_path
           Value: true
       Enabled: true
       Name: Control

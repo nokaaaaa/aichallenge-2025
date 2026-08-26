@@ -1060,8 +1060,9 @@ class MPCController(Node):
         self._car.update_states(pose.x, pose.y, pose.theta)
         self._car.update_reference_path(self._car.reference_path)
 
-        if self._ref_vel_configulator is None:
-            self._publish_ref_path_marker(self._car.reference_path)
+        # Keep the MPC reference path visible even when the reference velocity
+        # configurator is active.
+        self._publish_ref_path_marker(self._car.reference_path)
 
         self._pred_marker_color = CYAN
 
