@@ -86,7 +86,10 @@ void SimplePurePursuit::onTimer()
   double target_longitudinal_vel =
     use_external_target_vel_ ? external_target_vel_ : closet_traj_point.longitudinal_velocity_mps;
   cmd.longitudinal.speed = target_longitudinal_vel;
-  cmd.longitudinal.acceleration = 3.0;
+  const double target_acceleration =
+    speed_proportional_gain_ * (target_longitudinal_vel - current_longitudinal_vel);
+  cmd.longitudinal.acceleration = std::clamp(
+    target_acceleration, -max_acceleration_, max_acceleration_);
 
   // calc lateral control
   //// calc lookahead distance

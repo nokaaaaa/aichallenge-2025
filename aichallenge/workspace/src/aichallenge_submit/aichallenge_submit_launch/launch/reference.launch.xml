@@ -23,6 +23,8 @@
   <!-- Control method -->
   <arg name="control_method" default="pp_mpc_avoidance"
       description="Select control: mpc, pure_pursuit, pp_mpc_avoidance, tiny_lidar_net, pilot_net, joycon, rl_train"/>
+  <arg name="pure_pursuit_use_external_target_vel" default="false"/>
+  <arg name="pure_pursuit_external_target_vel" default="10.0"/>
 
   <!-- Global parameters -->
   <group scoped="false">
@@ -148,6 +150,8 @@
     <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/pure_pursuit.launch.xml">
       <arg name="simulation" value="$(var simulation)"/>
       <arg name="use_sim_time" value="$(var use_sim_time)"/>
+      <arg name="use_external_target_vel" value="$(var pure_pursuit_use_external_target_vel)"/>
+      <arg name="external_target_vel" value="$(var pure_pursuit_external_target_vel)"/>
     </include>
   </group>
 

@@ -3,6 +3,9 @@
   <arg name="simulation" default="true"/>
   <arg name="use_sim_time" default="true"/>
   <arg name="control_cmd_topic" default="/control/command/control_cmd"/>
+  <arg name="trajectory_topic" default="/planning/scenario_planning/trajectory"/>
+  <arg name="use_external_target_vel" default="false"/>
+  <arg name="external_target_vel" default="10.0"/>
 
   <let name="steering_tire_angle_gain_var" value="1.50" if="$(var simulation)"/>
   <let name="steering_tire_angle_gain_var" value="1.639" unless="$(var simulation)"/>
@@ -10,8 +13,8 @@
   <let name="control_delay_sec_var" value="0.30" unless="$(var simulation)"/>
 
   <node pkg="simple_pure_pursuit" exec="simple_pure_pursuit" name="simple_pure_pursuit_node" output="screen">
-    <param name="use_external_target_vel" value="false"/>
-    <param name="external_target_vel" value="10.0"/>
+    <param name="use_external_target_vel" value="$(var use_external_target_vel)"/>
+    <param name="external_target_vel" value="$(var external_target_vel)"/>
     <param name="wheel_base" value="1.087"/>
     <param name="lookahead_gain" value="0.25"/>
     <param name="lookahead_min_distance" value="2.0"/>
@@ -22,7 +25,7 @@
     <param name="max_acceleration" value="3.0"/>
 
     <remap from="input/kinematics" to="/localization/kinematic_state"/>
-    <remap from="input/trajectory" to="/planning/scenario_planning/trajectory"/>
+    <remap from="input/trajectory" to="$(var trajectory_topic)"/>
     <remap from="output/control_cmd" to="$(var control_cmd_topic)"/>
   </node>
 </launch>

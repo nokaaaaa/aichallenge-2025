@@ -87,9 +87,17 @@ dev2 dev3 dev4: simulator
 	@N=$(@:dev%=%); \
 	echo "Start $$N-vehicle dev (autoware on ROS_DOMAIN_ID 1..$$N via docker compose -p)"; \
 	for p in $$(seq 1 $$N); do \
-		if [ "$$p" = "1" ]; then control_method=pp_mpc_avoidance; else control_method=mpc; fi; \
-		echo "Start P$$p with CONTROL_METHOD=$$control_method"; \
-		LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p CONTROL_METHOD=$$control_method docker compose -p $$p up -d autoware; \
+		if [ "$$p" = "1" ]; then \
+			control_method=pp_mpc_avoidance; \
+			use_external_target_vel=false; \
+			external_target_vel=10.0; \
+		else \
+			control_method=pure_pursuit; \
+			use_external_target_vel=true; \
+			external_target_vel=4.1666666667; \
+		fi; \
+		echo "Start P$$p with CONTROL_METHOD=$$control_method target_vel=$$external_target_vel"; \
+		LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p VEHICLE_ID=P$$p CONTROL_METHOD=$$control_method PURE_PURSUIT_USE_EXTERNAL_TARGET_VEL=$$use_external_target_vel PURE_PURSUIT_EXTERNAL_TARGET_VEL=$$external_target_vel docker compose -p $$p up -d autoware; \
 	done; \
 	echo "To Stop: make down"
 

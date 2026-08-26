@@ -29,6 +29,12 @@ control_method="${CONTROL_METHOD:-}"
 if [ -n "${control_method}" ]; then
     opts+=("control_method:=${control_method}")
 fi
+if [ -n "${PURE_PURSUIT_USE_EXTERNAL_TARGET_VEL:-}" ]; then
+    opts+=("pure_pursuit_use_external_target_vel:=${PURE_PURSUIT_USE_EXTERNAL_TARGET_VEL}")
+fi
+if [ -n "${PURE_PURSUIT_EXTERNAL_TARGET_VEL:-}" ]; then
+    opts+=("pure_pursuit_external_target_vel:=${PURE_PURSUIT_EXTERNAL_TARGET_VEL}")
+fi
 
 mkdir -p "${out_dir}"
 exec >"${out_dir}/autoware.log" 2>&1
