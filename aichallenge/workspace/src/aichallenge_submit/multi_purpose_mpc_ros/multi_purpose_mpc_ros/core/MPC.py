@@ -333,7 +333,7 @@ class MPC:
         x_pred, y_pred = [], []
 
         # Iterate over prediction horizon
-        for n in range(2, N):
+        for n in range(N + 1):
             # Get associated waypoint
             associated_waypoint = self.model.reference_path.\
                 get_waypoint(self.model.wp_id+n)

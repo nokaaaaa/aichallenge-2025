@@ -29,7 +29,7 @@ from rclpy.parameter import Parameter
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
-from autoware_auto_planning_msgs.msg import Trajectory
+from autoware_auto_planning_msgs.msg import Trajectory, TrajectoryPoint
 from autoware_auto_vehicle_msgs.msg import GearCommand
 from v2x_msgs.msg import V2XVehiclePositionArray
 from multi_purpose_mpc_ros.v2x_vehicle_tracker import (
@@ -149,6 +149,9 @@ class MPCController(Node):
         self.declare_parameter("use_obstacle_avoidance", False)
         self.declare_parameter("use_stats", False)
         self.declare_parameter("reference_path_csv", "")
+        self.declare_parameter("publish_control_cmd", True)
+        self.declare_parameter("control_cmd_topic", "/control/command/control_cmd")
+        self.declare_parameter("control_cmd_raw_topic", "/control/command/control_cmd_raw")
 
         # get parameters
         self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
@@ -156,6 +159,9 @@ class MPCController(Node):
         self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
         self._reference_path_csv = self.get_parameter("reference_path_csv").get_parameter_value().string_value
+        self._publish_control_cmd = self.get_parameter("publish_control_cmd").get_parameter_value().bool_value
+        self._control_cmd_topic = self.get_parameter("control_cmd_topic").get_parameter_value().string_value
+        self._control_cmd_raw_topic = self.get_parameter("control_cmd_raw_topic").get_parameter_value().string_value
 
         self._config_path = config_path
         self._ref_vel_config_path: Optional[str] = ref_vel_config_path
@@ -523,9 +529,9 @@ class MPCController(Node):
             AckermannControlBoostCommand, "/boost_commander/command", 1)
         else:
           self._command_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd", 1)
+            AckermannControlCommand, self._control_cmd_topic, 1)
           self._command_raw_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd_raw", 1)
+            AckermannControlCommand, self._control_cmd_raw_topic, 1)
           print("use normal ackermann control command")
         self._gear_pub = self.create_publisher(
             GearCommand, "/control/command/gear_cmd", 1)
@@ -533,6 +539,13 @@ class MPCController(Node):
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
         self._mpc_pred_pub = self.create_publisher(
             MarkerArray, "/mpc/prediction", 1)
+        prediction_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self._mpc_trajectory_pub = self.create_publisher(
+            Trajectory, "/mpc/predicted_trajectory", prediction_qos)
         self._mpc_pred_pub_dummy = self.create_publisher(
             MarkerArray, "/planning/scenario_planning/lane_driving/motion_planning/obstacle_stop_planner/virtual_wall", 1)
 
@@ -596,6 +609,8 @@ class MPCController(Node):
         return ackerman_boost_cmd
 
     def _publish_control_command(self, stamp, u, acc, bug_acc_enabled):
+        if not self._publish_control_cmd:
+            return
         cmd = self._create_ackerman_control_command(stamp, u, acc, bug_acc_enabled)
 
         # publish raw control command
@@ -762,6 +777,8 @@ class MPCController(Node):
         return True
 
     def _publish_gear(self, command: int) -> None:
+        if not self._publish_control_cmd:
+            return
         gear = GearCommand()
         gear.stamp = self.get_clock().now().to_msg()
         gear.command = command
@@ -871,6 +888,36 @@ class MPCController(Node):
             pred_marker_array.markers.append(m) # type: ignore
         self._mpc_pred_pub.publish(pred_marker_array)
         self._mpc_pred_pub_dummy.publish(pred_marker_array)
+
+    def _publish_mpc_trajectory(self, x_pred, y_pred):
+        """Publish the current MPC spatial prediction as a Pure Pursuit path."""
+        if len(x_pred) < 2:
+            return
+
+        trajectory = Trajectory()
+        trajectory.header.stamp = self.get_clock().now().to_msg()
+        trajectory.header.frame_id = "map"
+        for i, (x, y) in enumerate(zip(x_pred, y_pred)):
+            point = TrajectoryPoint()
+            point.pose.position.x = float(x)
+            point.pose.position.y = float(y)
+
+            if i + 1 < len(x_pred):
+                dx = x_pred[i + 1] - x
+                dy = y_pred[i + 1] - y
+            else:
+                dx = x - x_pred[i - 1]
+                dy = y - y_pred[i - 1]
+            yaw = float(np.arctan2(dy, dx))
+            point.pose.orientation.z = float(np.sin(yaw * 0.5))
+            point.pose.orientation.w = float(np.cos(yaw * 0.5))
+
+            waypoint = self._mpc.model.reference_path.get_waypoint(
+                self._mpc.model.wp_id + i)
+            point.longitudinal_velocity_mps = float(max(0.0, waypoint.v_ref or 0.0))
+            trajectory.points.append(point)
+
+        self._mpc_trajectory_pub.publish(trajectory)
 
     def _publish_ref_path_marker(self, ref_path: ReferencePath):
         WP_SPHERE_ENABLED = False
@@ -1060,6 +1107,9 @@ class MPCController(Node):
         if (self._mpc.current_prediction is not None) and (self._loop % (self._mpc_cfg.control_rate // 4) == 0):
             self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
+        if self._mpc.current_prediction is not None:
+            self._publish_mpc_trajectory(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+
     def run(self) -> None:
         self._wait_until_clock_received()
         self._wait_until_odom_received()
@@ -1111,7 +1161,8 @@ class MPCController(Node):
 
         # Publish zero command to stop the car completely
         zero_cmd = self._create_ackerman_control_command(self.get_clock().now(), [0.0, 0.0], 0.0, False)
-        self._command_pub.publish(zero_cmd)
+        if self._publish_control_cmd:
+            self._command_pub.publish(zero_cmd)
 
         self.get_logger().warn(">> Stop Completed!")
 

@@ -5,6 +5,9 @@
   <arg name="reference_path_csv" default="$(find-pkg-share aichallenge_submit_launch)/traj/traj.csv"/>
   <!-- Track selection: citycircuit uses config.yaml/ref_vel.yaml; other tracks use config_<track>.yaml/ref_vel_<track>.yaml -->
   <arg name="track" default="citycircuit"/>
+  <arg name="publish_control_cmd" default="true"/>
+  <arg name="control_cmd_topic" default="/control/command/control_cmd"/>
+  <arg name="control_cmd_raw_topic" default="/control/command/control_cmd_raw"/>
   <arg name="config_file" default="$(eval &quot;'config.yaml' if '$(var track)' == 'citycircuit' else 'config_' + '$(var track)' + '.yaml'&quot;)"/>
   <arg name="ref_vel_file" default="$(eval &quot;'ref_vel.yaml' if '$(var track)' == 'citycircuit' else 'ref_vel_' + '$(var track)' + '.yaml'&quot;)"/>
 
@@ -17,5 +20,8 @@
     <param name="use_obstacle_avoidance" value="$(var use_obstacle_avoidance)"/>
     <param name="reference_path_csv" value="$(var reference_path_csv)"/>
     <param name="use_stats" value="false"/>
+    <param name="publish_control_cmd" value="$(var publish_control_cmd)"/>
+    <param name="control_cmd_topic" value="$(var control_cmd_topic)"/>
+    <param name="control_cmd_raw_topic" value="$(var control_cmd_raw_topic)"/>
   </node>
 </launch>
