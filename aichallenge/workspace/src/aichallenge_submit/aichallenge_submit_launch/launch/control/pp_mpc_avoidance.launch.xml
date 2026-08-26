@@ -53,13 +53,9 @@
     <param name="lookahead_waypoints" value="6"/>
     <param name="lookahead_distance" value="3.0"/>
     <param name="vehicle_search_waypoints" value="60"/>
-    <param name="planning_goal_waypoints" value="90"/>
-    <param name="planning_margin" value="4.0"/>
-    <param name="vehicle_wall_radius" value="1.25"/>
-    <param name="ego_collision_radius" value="0.85"/>
-    <param name="path_follow_cost" value="0.001"/>
     <param name="target_speed" value="8.333333333333334"/>
     <param name="debug_path_topic" value="/planning/overtake/target_path"/>
+    <param name="reference_path_topic" value="/planning/overtake/reference_path"/>
   </node>
 
   <node pkg="multi_purpose_mpc_ros" exec="control_cmd_mux" name="control_cmd_mux" output="screen">

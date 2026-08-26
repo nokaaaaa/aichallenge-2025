@@ -2,20 +2,22 @@
 
 import math
 import os
-import heapq
 from typing import List, Optional, Tuple
 
-import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSHistoryPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+)
 
 from autoware_auto_control_msgs.msg import AckermannControlCommand
 from autoware_auto_planning_msgs.msg import Trajectory
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry, Path
-from skimage.morphology import binary_dilation, disk
 from v2x_msgs.msg import V2XVehiclePositionArray
 
 from multi_purpose_mpc_ros.common import resolve_package_path
@@ -26,192 +28,117 @@ from multi_purpose_mpc_ros.v2x_vehicle_tracker import (
 )
 
 
-class CostmapPathPlanner:
+class GeometricOvertakePlanner:
     def __init__(
         self,
         map_yaml_path: str,
-        vehicle_radius: float,
-        ego_radius: float,
-        planning_margin: float,
-        path_follow_cost: float,
     ) -> None:
         self._map = Map(map_yaml_path)
-        self._vehicle_radius = vehicle_radius
-        self._ego_radius = ego_radius
-        self._planning_margin = planning_margin
-        self._path_follow_cost = path_follow_cost
-        self._static_inflated_grid = self._build_inflated_static_grid()
 
     def plan(
         self,
-        start_xy: Tuple[float, float],
-        goal_xy: Tuple[float, float],
         reference_xy: List[Tuple[float, float]],
-        vehicle_xy: List[Tuple[float, float]],
+        target_vehicle_xy: Tuple[float, float],
+        target_waypoint_index: int,
     ) -> Optional[List[Tuple[float, float]]]:
-        grid = self._static_inflated_grid.copy()
-        self._paint_vehicle_walls(grid, vehicle_xy)
-
-        sx, sy = self._map.w2m(start_xy[0], start_xy[1])
-        gx, gy = self._map.w2m(goal_xy[0], goal_xy[1])
-        bounds = self._local_bounds((sx, sy), (gx, gy), reference_xy, vehicle_xy)
-
-        if not self._in_bounds(sx, sy, bounds):
+        waypoint_count = len(reference_xy)
+        if waypoint_count < 42:
             return None
-        if grid[sy, sx] == 0:
-            sx, sy = self._nearest_free_cell(grid, sx, sy, bounds) or (sx, sy)
-        if grid[gy, gx] == 0:
-            nearest_goal = self._nearest_free_cell(grid, gx, gy, bounds)
-            if nearest_goal is None:
-                return None
-            gx, gy = nearest_goal
-
-        path_cells = self._astar(grid, (sx, sy), (gx, gy), bounds, reference_xy)
-        if not path_cells:
+        j_index = (target_waypoint_index - 30) % waypoint_count
+        l_index = (target_waypoint_index + 10) % waypoint_count
+        k = self._compute_k(target_vehicle_xy, reference_xy[target_waypoint_index])
+        if k is None:
             return None
-        return [self._map.m2w(x, y) for x, y in self._downsample_cells(path_cells)]
 
-    def _build_inflated_static_grid(self) -> np.ndarray:
-        radius_px = max(1, int(math.ceil(self._ego_radius / self._map.resolution)))
-        occupied = self._map.data == 0
-        inflated = binary_dilation(occupied, disk(radius_px))
-        return np.where(inflated, 0, self._map.data).astype(np.int8)
-
-    def _paint_vehicle_walls(self, grid: np.ndarray, vehicles: List[Tuple[float, float]]) -> None:
-        radius_px = max(1, int(math.ceil(self._vehicle_radius / self._map.resolution)))
-        for x, y in vehicles:
-            cx, cy = self._map.w2m(x, y)
-            self._paint_disc(grid, cx, cy, radius_px)
-
-    @staticmethod
-    def _paint_disc(grid: np.ndarray, cx: int, cy: int, radius_px: int) -> None:
-        y_min = max(0, cy - radius_px)
-        y_max = min(grid.shape[0], cy + radius_px + 1)
-        x_min = max(0, cx - radius_px)
-        x_max = min(grid.shape[1], cx + radius_px + 1)
-        yy, xx = np.ogrid[y_min:y_max, x_min:x_max]
-        mask = (xx - cx) ** 2 + (yy - cy) ** 2 <= radius_px ** 2
-        grid[y_min:y_max, x_min:x_max][mask] = 0
-
-    def _local_bounds(
-        self,
-        start: Tuple[int, int],
-        goal: Tuple[int, int],
-        reference_xy: List[Tuple[float, float]],
-        vehicle_xy: List[Tuple[float, float]],
-    ) -> Tuple[int, int, int, int]:
-        xs = [start[0], goal[0]]
-        ys = [start[1], goal[1]]
-        for x, y in reference_xy + vehicle_xy:
-            mx, my = self._map.w2m(x, y)
-            xs.append(mx)
-            ys.append(my)
-        margin_px = max(4, int(math.ceil(self._planning_margin / self._map.resolution)))
-        return (
-            max(0, min(xs) - margin_px),
-            min(self._map.width - 1, max(xs) + margin_px),
-            max(0, min(ys) - margin_px),
-            min(self._map.height - 1, max(ys) + margin_px),
-        )
-
-    @staticmethod
-    def _in_bounds(x: int, y: int, bounds: Tuple[int, int, int, int]) -> bool:
-        min_x, max_x, min_y, max_y = bounds
-        return min_x <= x <= max_x and min_y <= y <= max_y
-
-    def _nearest_free_cell(
-        self,
-        grid: np.ndarray,
-        x: int,
-        y: int,
-        bounds: Tuple[int, int, int, int],
-    ) -> Optional[Tuple[int, int]]:
-        for radius in range(1, 12):
-            for yy in range(y - radius, y + radius + 1):
-                for xx in range(x - radius, x + radius + 1):
-                    if not self._in_bounds(xx, yy, bounds):
-                        continue
-                    if grid[yy, xx] != 0:
-                        return xx, yy
-        return None
-
-    def _astar(
-        self,
-        grid: np.ndarray,
-        start: Tuple[int, int],
-        goal: Tuple[int, int],
-        bounds: Tuple[int, int, int, int],
-        reference_xy: List[Tuple[float, float]],
-    ) -> Optional[List[Tuple[int, int]]]:
-        reference_cells = [self._map.w2m(x, y) for x, y in reference_xy]
-        open_heap = [(self._heuristic(start, goal), 0.0, start)]
-        came_from = {}
-        g_score = {start: 0.0}
-        neighbors = (
-            (-1, -1, math.sqrt(2.0)), (0, -1, 1.0), (1, -1, math.sqrt(2.0)),
-            (-1, 0, 1.0), (1, 0, 1.0),
-            (-1, 1, math.sqrt(2.0)), (0, 1, 1.0), (1, 1, math.sqrt(2.0)),
-        )
-
-        while open_heap:
-            _f, current_g, current = heapq.heappop(open_heap)
-            if current == goal:
-                return self._reconstruct_path(came_from, current)
-            if current_g > g_score.get(current, float("inf")):
+        # J and L are retained as anchors; the original inclusive J..L section
+        # is replaced by equally spaced samples of J-K and K-L.
+        j = reference_xy[j_index]
+        l = reference_xy[l_index]
+        spacing = self._nominal_spacing(reference_xy)
+        segment_jk = self._interpolate(j, k, max(1, int(round(self._distance(j, k) / spacing))))
+        segment_kl = self._interpolate(k, l, max(1, int(round(self._distance(k, l) / spacing))))
+        replaced = segment_jk[:-1] + segment_kl
+        path = []
+        for offset in range(waypoint_count):
+            idx = (j_index + offset) % waypoint_count
+            if idx == j_index:
+                path.extend(replaced)
+            if offset <= 40:
                 continue
-
-            for dx, dy, step_cost in neighbors:
-                nx = current[0] + dx
-                ny = current[1] + dy
-                if not self._in_bounds(nx, ny, bounds) or grid[ny, nx] == 0:
-                    continue
-                tentative = current_g + step_cost + self._reference_cost(nx, ny, reference_cells)
-                neighbor = (nx, ny)
-                if tentative >= g_score.get(neighbor, float("inf")):
-                    continue
-                came_from[neighbor] = current
-                g_score[neighbor] = tentative
-                heapq.heappush(
-                    open_heap,
-                    (tentative + self._heuristic(neighbor, goal), tentative, neighbor),
-                )
-        return None
-
-    @staticmethod
-    def _heuristic(a: Tuple[int, int], b: Tuple[int, int]) -> float:
-        return math.hypot(a[0] - b[0], a[1] - b[1])
-
-    def _reference_cost(self, x: int, y: int, reference_cells: List[Tuple[int, int]]) -> float:
-        if not reference_cells or self._path_follow_cost <= 0.0:
-            return 0.0
-        min_dist_sq = min((x - rx) ** 2 + (y - ry) ** 2 for rx, ry in reference_cells)
-        return self._path_follow_cost * min_dist_sq
-
-    @staticmethod
-    def _reconstruct_path(came_from, current: Tuple[int, int]) -> List[Tuple[int, int]]:
-        path = [current]
-        while current in came_from:
-            current = came_from[current]
-            path.append(current)
-        path.reverse()
+            path.append(reference_xy[idx])
+        # Keep the cyclic route ordered from J through L and back to J.
         return path
 
+    def _compute_k(
+        self, vehicle_xy: Tuple[float, float], waypoint_xy: Tuple[float, float]
+    ) -> Optional[Tuple[float, float]]:
+        dx = waypoint_xy[0] - vehicle_xy[0]
+        dy = waypoint_xy[1] - vehicle_xy[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-6:
+            return None
+        direction = (dx / length, dy / length)
+        intersections = []
+        for sign in (-1.0, 1.0):
+            distance = self._distance_to_wall(vehicle_xy, (sign * direction[0], sign * direction[1]))
+            if distance is not None:
+                intersections.append(sign * distance)
+        if len(intersections) != 2:
+            return None
+        far_distance = max(intersections, key=abs)
+        return (
+            vehicle_xy[0] + direction[0] * far_distance * 0.5,
+            vehicle_xy[1] + direction[1] * far_distance * 0.5,
+        )
+
+    def _distance_to_wall(
+        self, origin: Tuple[float, float], direction: Tuple[float, float]
+    ) -> Optional[float]:
+        step = max(self._map.resolution * 0.5, 0.01)
+        distance = 0.0
+        while distance < 200.0:
+            distance += step
+            x = origin[0] + direction[0] * distance
+            y = origin[1] + direction[1] * distance
+            cell = self._world_to_map(x, y)
+            if cell is None:
+                return distance
+            mx, my = cell
+            if self._map.data[my, mx] == 0:
+                return distance
+        return None
+
+    def _world_to_map(self, x: float, y: float) -> Optional[Tuple[int, int]]:
+        mx = int((x - self._map.origin[0]) / self._map.resolution + 0.5)
+        my = int((self._map.height - 1) - (y - self._map.origin[1]) / self._map.resolution + 0.5)
+        if 0 <= mx < self._map.width and 0 <= my < self._map.height:
+            return mx, my
+        return None
+
     @staticmethod
-    def _downsample_cells(cells: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-        if len(cells) <= 2:
-            return cells
-        out = [cells[0]]
-        prev_dx = cells[1][0] - cells[0][0]
-        prev_dy = cells[1][1] - cells[0][1]
-        for i in range(1, len(cells) - 1):
-            dx = cells[i + 1][0] - cells[i][0]
-            dy = cells[i + 1][1] - cells[i][1]
-            if dx != prev_dx or dy != prev_dy:
-                out.append(cells[i])
-                prev_dx = dx
-                prev_dy = dy
-        out.append(cells[-1])
-        return out
+    def _distance(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+        return math.hypot(b[0] - a[0], b[1] - a[1])
+
+    @classmethod
+    def _nominal_spacing(cls, reference_xy: List[Tuple[float, float]]) -> float:
+        distances = [
+            cls._distance(reference_xy[i], reference_xy[(i + 1) % len(reference_xy)])
+            for i in range(len(reference_xy))
+        ]
+        usable = [distance for distance in distances if distance > 1e-3]
+        return max(sum(usable) / max(len(usable), 1), 0.05)
+
+    @staticmethod
+    def _interpolate(
+        start: Tuple[float, float], end: Tuple[float, float], count: int
+    ) -> List[Tuple[float, float]]:
+        return [
+            (
+                start[0] + (end[0] - start[0]) * i / count,
+                start[1] + (end[1] - start[1]) * i / count,
+            )
+            for i in range(count + 1)
+        ]
 
 
 class SimpleOvertakeController(Node):
@@ -229,17 +156,13 @@ class SimpleOvertakeController(Node):
         self.declare_parameter("lookahead_waypoints", 6)
         self.declare_parameter("lookahead_distance", 3.0)
         self.declare_parameter("vehicle_search_waypoints", 12)
-        self.declare_parameter("planning_goal_waypoints", 70)
-        self.declare_parameter("planning_margin", 4.0)
-        self.declare_parameter("vehicle_wall_radius", 1.25)
-        self.declare_parameter("ego_collision_radius", 0.85)
-        self.declare_parameter("path_follow_cost", 0.001)
         self.declare_parameter("target_speed", 8.333333333333334)
         self.declare_parameter("kp_accel", 1.2)
         self.declare_parameter("min_acceleration", -2.0)
         self.declare_parameter("max_acceleration", 3.0)
         self.declare_parameter("steering_limit", 0.64)
         self.declare_parameter("debug_path_topic", "/planning/overtake/target_path")
+        self.declare_parameter("reference_path_topic", "/planning/overtake/reference_path")
 
         self._ego_vehicle_id = str(self.get_parameter("ego_vehicle_id").value)
         self._enabled_ego_vehicle_id = str(self.get_parameter("enabled_ego_vehicle_id").value)
@@ -247,7 +170,6 @@ class SimpleOvertakeController(Node):
         self._lookahead_waypoints = int(self.get_parameter("lookahead_waypoints").value)
         self._lookahead_distance = float(self.get_parameter("lookahead_distance").value)
         self._vehicle_search_waypoints = int(self.get_parameter("vehicle_search_waypoints").value)
-        self._planning_goal_waypoints = int(self.get_parameter("planning_goal_waypoints").value)
         self._target_speed = float(self.get_parameter("target_speed").value)
         self._kp_accel = float(self.get_parameter("kp_accel").value)
         self._min_accel = float(self.get_parameter("min_acceleration").value)
@@ -263,6 +185,7 @@ class SimpleOvertakeController(Node):
 
         output_topic = str(self.get_parameter("output_cmd_topic").value)
         debug_path_topic = str(self.get_parameter("debug_path_topic").value)
+        reference_path_topic = str(self.get_parameter("reference_path_topic").value)
         kinematics_topic = str(self.get_parameter("kinematics_topic").value)
         trajectory_topic = str(self.get_parameter("trajectory_topic").value)
         v2x_topic = str(self.get_parameter("v2x_topic").value)
@@ -270,16 +193,19 @@ class SimpleOvertakeController(Node):
             str(self.get_parameter("map_yaml_path").value),
             get_package_share_directory("multi_purpose_mpc_ros"),
         )
-        self._planner = CostmapPathPlanner(
-            map_yaml_path=map_yaml_path,
-            vehicle_radius=float(self.get_parameter("vehicle_wall_radius").value),
-            ego_radius=float(self.get_parameter("ego_collision_radius").value),
-            planning_margin=float(self.get_parameter("planning_margin").value),
-            path_follow_cost=float(self.get_parameter("path_follow_cost").value),
-        )
+        self._planner = GeometricOvertakePlanner(map_yaml_path=map_yaml_path)
 
         self._pub = self.create_publisher(AckermannControlCommand, output_topic, 1)
-        self._path_pub = self.create_publisher(Path, debug_path_topic, 1)
+        path_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self._path_pub = self.create_publisher(Path, debug_path_topic, path_qos)
+        self._reference_path_pub = self.create_publisher(
+            Path, reference_path_topic, path_qos
+        )
         self.create_subscription(Odometry, kinematics_topic, self._odom_callback, 1)
         trajectory_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -293,7 +219,7 @@ class SimpleOvertakeController(Node):
         self.get_logger().info(
             f"Costmap overtake controller publishing '{output_topic}' for "
             f"ego='{self._enabled_ego_vehicle_id}' using map '{map_yaml_path}', "
-            f"debug path='{debug_path_topic}'")
+            f"debug path='{debug_path_topic}', reference path='{reference_path_topic}'")
 
     def _odom_callback(self, msg: Odometry) -> None:
         self._odom = msg
@@ -320,6 +246,11 @@ class SimpleOvertakeController(Node):
             return
 
         points = self._trajectory.points
+        reference_xy = [
+            (float(point.pose.position.x), float(point.pose.position.y))
+            for point in points
+        ]
+        self._publish_reference_path(reference_xy)
         ego_x = float(self._odom.pose.pose.position.x)
         ego_y = float(self._odom.pose.pose.position.y)
         ego_idx = nearest_waypoint_index(points, ego_x, ego_y)
@@ -333,12 +264,16 @@ class SimpleOvertakeController(Node):
             self._publish_path([])
             return
 
-        vehicle_id, _target_x, _target_y = target_vehicle
+        vehicle_id, target_x, target_y = target_vehicle
         if self._needs_replan(vehicle_id):
-            self._planned_path = self._plan_overtake_path(ego_idx)
+            self._planned_path = self._plan_overtake_path((target_x, target_y))
             self._planned_for_vehicle_id = vehicle_id
             self._last_plan_time = self.get_clock().now()
             self._publish_path(self._planned_path)
+            self.get_logger().info(
+                f"Published overtake path with {len(self._planned_path)} points "
+                f"for vehicle '{vehicle_id}'"
+            )
         if not self._planned_path:
             return
 
@@ -366,29 +301,29 @@ class SimpleOvertakeController(Node):
 
         self._publish(speed, accel, steering)
 
-    def _plan_overtake_path(self, ego_idx: int) -> List[Tuple[float, float]]:
+    def _plan_overtake_path(
+        self, target_vehicle_xy: Tuple[float, float]
+    ) -> List[Tuple[float, float]]:
         points = self._trajectory.points
-        goal_idx = (ego_idx + self._planning_goal_waypoints) % len(points)
-        ego_x = float(self._odom.pose.pose.position.x)
-        ego_y = float(self._odom.pose.pose.position.y)
-        goal_x = float(points[goal_idx].pose.position.x)
-        goal_y = float(points[goal_idx].pose.position.y)
         reference_xy = [
             (
-                float(points[(ego_idx + i) % len(points)].pose.position.x),
-                float(points[(ego_idx + i) % len(points)].pose.position.y),
+                float(point.pose.position.x),
+                float(point.pose.position.y),
             )
-            for i in range(self._planning_goal_waypoints + 1)
+            for point in points
         ]
-        vehicle_xy = self._planning_vehicle_positions(ego_idx)
+        target_waypoint_index = nearest_waypoint_index(
+            points, target_vehicle_xy[0], target_vehicle_xy[1]
+        )
+        if target_waypoint_index is None:
+            return []
         planned = self._planner.plan(
-            (ego_x, ego_y),
-            (goal_x, goal_y),
             reference_xy,
-            vehicle_xy,
+            target_vehicle_xy,
+            target_waypoint_index,
         )
         if planned is None:
-            self.get_logger().warn("Costmap overtake planner failed to find a path")
+            self.get_logger().warn("Geometric overtake planner failed to find a path")
             return []
         return planned
 
@@ -399,18 +334,6 @@ class SimpleOvertakeController(Node):
             return True
         elapsed = (self.get_clock().now() - self._last_plan_time).nanoseconds * 1e-9
         return elapsed >= 0.25
-
-    def _planning_vehicle_positions(self, ego_idx: int) -> List[Tuple[float, float]]:
-        points = self._trajectory.points
-        vehicle_xy: List[Tuple[float, float]] = []
-        for _vehicle_id, x, y in self._vehicles:
-            vehicle_idx = nearest_waypoint_index(points, x, y)
-            if vehicle_idx is None:
-                continue
-            ahead = forward_waypoint_distance(ego_idx, vehicle_idx, len(points))
-            if ahead <= self._planning_goal_waypoints + self._vehicle_search_waypoints:
-                vehicle_xy.append((x, y))
-        return vehicle_xy
 
     def _nearest_vehicle_ahead(self, ego_idx: int) -> Optional[Tuple[str, float, float]]:
         if self._trajectory is None:
@@ -472,6 +395,12 @@ class SimpleOvertakeController(Node):
         self._pub.publish(cmd)
 
     def _publish_path(self, path_xy: List[Tuple[float, float]]) -> None:
+        self._publish_path_message(self._path_pub, path_xy)
+
+    def _publish_reference_path(self, path_xy: List[Tuple[float, float]]) -> None:
+        self._publish_path_message(self._reference_path_pub, path_xy)
+
+    def _publish_path_message(self, publisher, path_xy: List[Tuple[float, float]]) -> None:
         msg = Path()
         msg.header.stamp = self.get_clock().now().to_msg()
         if self._trajectory is not None and self._trajectory.header.frame_id:
@@ -485,7 +414,7 @@ class SimpleOvertakeController(Node):
             pose.pose.position.y = float(y)
             pose.pose.orientation.w = 1.0
             msg.poses.append(pose)
-        self._path_pub.publish(msg)
+        publisher.publish(msg)
 
 
 def main(args=None) -> None:

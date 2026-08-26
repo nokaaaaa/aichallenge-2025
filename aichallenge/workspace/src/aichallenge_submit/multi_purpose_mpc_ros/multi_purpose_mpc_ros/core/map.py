@@ -4,8 +4,25 @@ import yaml
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from PIL import Image
-from skimage.morphology import remove_small_holes
-from skimage.draw import line_aa
+try:
+    from skimage.morphology import remove_small_holes
+except ImportError:
+    # The runtime image does not include scikit-image. Keep map loading
+    # available for controllers that only need the occupancy grid.
+    def remove_small_holes(image, area_threshold=64, connectivity=1):
+        del area_threshold, connectivity
+        return image
+try:
+    from skimage.draw import line_aa
+except ImportError:
+    def line_aa(x0, y0, x1, y1):
+        # Bresenham fallback for map boundary rasterization.
+        steps = max(abs(x1 - x0), abs(y1 - y0))
+        if steps == 0:
+            return np.array([x0]), np.array([y0]), np.array([1.0])
+        x = np.rint(np.linspace(x0, x1, steps + 1)).astype(int)
+        y = np.rint(np.linspace(y0, y1, steps + 1)).astype(int)
+        return x, y, np.ones(steps + 1)
 import matplotlib.patches as plt_patches
 
 # Colors

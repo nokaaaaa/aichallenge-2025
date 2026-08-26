@@ -480,11 +480,31 @@ Visualization Manager:
           Pose Style: None
           Topic:
             Depth: 1
-            Durability Policy: Volatile
+            Durability Policy: Transient Local
             Filter size: 1
             History Policy: Keep Last
-            Reliability Policy: Best Effort
+            Reliability Policy: Reliable
             Value: /planning/overtake/target_path
+          Value: true
+        - Class: rviz_default_plugins/Path
+          Color: 80; 180; 255
+          Enabled: true
+          Line Style: Lines
+          Line Width: 0.2
+          Name: OvertakeReferencePath
+          Offset:
+            X: 0
+            Y: 0
+            Z: 0.03
+          Pose Color: 80; 180; 255
+          Pose Style: None
+          Topic:
+            Depth: 1
+            Durability Policy: Transient Local
+            Filter size: 1
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /planning/overtake/reference_path
           Value: true
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
