@@ -81,7 +81,15 @@ dev4: SIM_MODE := dev4
 dev2 dev3 dev4: simulator
 	@N=$(@:dev%=%); \
 	echo "Start $$N-vehicle dev (autoware on ROS_DOMAIN_ID 1..$$N via docker compose -p)"; \
-	for p in $$(seq 1 $$N); do LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p docker compose -p $$p up -d autoware; done; \
+	for p in $$(seq 1 $$N); do \
+		if [ "$@" = "dev3" ] && [ "$$p" = "1" ]; then \
+			LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p CONTROL_METHOD=mpc docker compose -p $$p up -d autoware; \
+		elif [ "$@" = "dev3" ]; then \
+			LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p MAX_TARGET_VELOCITY=5.5555556 docker compose -p $$p up -d autoware; \
+		else \
+			LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p docker compose -p $$p up -d autoware; \
+		fi; \
+	done; \
 	echo "To Stop: make down"
 
 # e2e は練習兼提出参考モード（e2e.sh）。e2e-final.sh は make simulator-e2e-final。

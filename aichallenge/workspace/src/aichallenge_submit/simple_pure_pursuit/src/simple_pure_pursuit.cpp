@@ -23,8 +23,11 @@ SimplePurePursuit::SimplePurePursuit()
   speed_proportional_gain_(declare_parameter<float>("speed_proportional_gain", 1.0)),
   use_external_target_vel_(declare_parameter<bool>("use_external_target_vel", false)),
   external_target_vel_(declare_parameter<float>("external_target_vel", 0.0)),
+  max_target_velocity_(declare_parameter<float>("max_target_velocity", 0.0)),
   steering_tire_angle_gain_(declare_parameter<float>("steering_tire_angle_gain", 1.0)),
-  max_acceleration_(declare_parameter<float>("max_acceleration", 3.0))
+  max_acceleration_(declare_parameter<float>("max_acceleration", 3.0)),
+  control_delay_sec_(declare_parameter<float>("control_delay_sec", 0.0)),
+  max_steering_tire_angle_(declare_parameter<float>("max_steering_tire_angle", 0.64))
 {
   pub_cmd_ = create_publisher<AckermannControlCommand>("output/control_cmd", 1);
   pub_raw_cmd_ = create_publisher<AckermannControlCommand>("output/raw_control_cmd", 1);
@@ -71,6 +74,9 @@ void SimplePurePursuit::onTimer()
   // calc longitudinal speed and acceleration
   double target_longitudinal_vel =
     use_external_target_vel_ ? external_target_vel_ : closet_traj_point.longitudinal_velocity_mps;
+  if (max_target_velocity_ > 0.0) {
+    target_longitudinal_vel = std::min(target_longitudinal_vel, max_target_velocity_);
+  }
   double current_longitudinal_vel = odometry_->twist.twist.linear.x;
 
   cmd.longitudinal.speed = target_longitudinal_vel;
@@ -81,11 +87,16 @@ void SimplePurePursuit::onTimer()
   // calc lateral control
   //// calc lookahead distance
   double lookahead_distance = lookahead_gain_ * target_longitudinal_vel + lookahead_min_distance_;
+  const double yaw = tf2::getYaw(odometry_->pose.pose.orientation);
+  const double yaw_rate = odometry_->twist.twist.angular.z;
+  const double predicted_yaw = yaw + yaw_rate * control_delay_sec_;
+  const double predicted_x =
+    odometry_->pose.pose.position.x + current_longitudinal_vel * std::cos(yaw) * control_delay_sec_;
+  const double predicted_y =
+    odometry_->pose.pose.position.y + current_longitudinal_vel * std::sin(yaw) * control_delay_sec_;
   //// calc center coordinate of rear wheel
-  double rear_x = odometry_->pose.pose.position.x -
-                  wheel_base_ / 2.0 * std::cos(odometry_->pose.pose.orientation.z);
-  double rear_y = odometry_->pose.pose.position.y -
-                  wheel_base_ / 2.0 * std::sin(odometry_->pose.pose.orientation.z);
+  double rear_x = predicted_x - wheel_base_ / 2.0 * std::cos(predicted_yaw);
+  double rear_y = predicted_y - wheel_base_ / 2.0 * std::sin(predicted_yaw);
   //// search lookahead point
   auto lookahead_point_itr = std::find_if(
     trajectory_->points.begin() + closet_traj_point_idx, trajectory_->points.end(),
@@ -93,6 +104,21 @@ void SimplePurePursuit::onTimer()
       return std::hypot(point.pose.position.x - rear_x, point.pose.position.y - rear_y) >=
              lookahead_distance;
     });
+  bool found_lookahead_point = lookahead_point_itr != trajectory_->points.end();
+  if (lookahead_point_itr == trajectory_->points.end()) {
+    lookahead_point_itr = std::find_if(
+      trajectory_->points.begin(), trajectory_->points.begin() + closet_traj_point_idx,
+      [&](const TrajectoryPoint & point) {
+        return std::hypot(point.pose.position.x - rear_x, point.pose.position.y - rear_y) >=
+               lookahead_distance;
+      });
+    found_lookahead_point = lookahead_point_itr != trajectory_->points.begin() + closet_traj_point_idx;
+  }
+  if (!found_lookahead_point) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 1000 /*ms*/, "lookahead point is not available");
+    return;
+  }
   double lookahead_point_x = lookahead_point_itr->pose.position.x;
   double lookahead_point_y = lookahead_point_itr->pose.position.y;
 
@@ -106,9 +132,12 @@ void SimplePurePursuit::onTimer()
 
   // calc steering angle for lateral control
   double alpha = std::atan2(lookahead_point_y - rear_y, lookahead_point_x - rear_x) -
-                 tf2::getYaw(odometry_->pose.pose.orientation);
-  cmd.lateral.steering_tire_angle =
+                 predicted_yaw;
+  alpha = std::atan2(std::sin(alpha), std::cos(alpha));
+  const double steering_tire_angle =
     steering_tire_angle_gain_ * std::atan2(2.0 * wheel_base_ * std::sin(alpha), lookahead_distance);
+  cmd.lateral.steering_tire_angle = static_cast<float>(
+    std::clamp(steering_tire_angle, -max_steering_tire_angle_, max_steering_tire_angle_));
 
   pub_cmd_->publish(cmd);
   cmd.lateral.steering_tire_angle /=  steering_tire_angle_gain_;
