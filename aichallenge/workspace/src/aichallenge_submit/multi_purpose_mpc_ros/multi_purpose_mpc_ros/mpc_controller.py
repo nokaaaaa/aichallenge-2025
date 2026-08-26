@@ -148,12 +148,14 @@ class MPCController(Node):
         self.declare_parameter("use_boost_acceleration", False)
         self.declare_parameter("use_obstacle_avoidance", False)
         self.declare_parameter("use_stats", False)
+        self.declare_parameter("reference_path_csv", "")
 
         # get parameters
         self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
         self.USE_BUG_ACC = self.get_parameter("use_boost_acceleration").get_parameter_value().bool_value
         self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
+        self._reference_path_csv = self.get_parameter("reference_path_csv").get_parameter_value().string_value
 
         self._config_path = config_path
         self._ref_vel_config_path: Optional[str] = ref_vel_config_path
@@ -339,10 +341,11 @@ class MPCController(Node):
         def create_ref_path(map: Map) -> ReferencePath:
             cfg_ref_path = self._cfg.reference_path # type: ignore
 
-            is_ref_path_given = cfg_ref_path.csv_path != "" # type: ignore
+            is_ref_path_given = bool(self._reference_path_csv or cfg_ref_path.csv_path) # type: ignore
             if is_ref_path_given:
                 print("Using given reference path")
-                wp_x, wp_y, _, _ = load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)) # type: ignore
+                reference_path_csv = self._reference_path_csv or self.in_pkg_share(cfg_ref_path.csv_path)
+                wp_x, wp_y, _, _ = load_ref_path(reference_path_csv)
                 return ReferencePath(
                     map,
                     wp_x,

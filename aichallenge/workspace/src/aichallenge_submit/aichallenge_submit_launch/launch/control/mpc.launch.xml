@@ -2,6 +2,7 @@
 <launch>
   <arg name="use_sim_time" default="true"/>
   <arg name="use_obstacle_avoidance" default="true"/>
+  <arg name="reference_path_csv" default="$(find-pkg-share aichallenge_submit_launch)/traj/traj.csv"/>
   <!-- Track selection: citycircuit uses config.yaml/ref_vel.yaml; other tracks use config_<track>.yaml/ref_vel_<track>.yaml -->
   <arg name="track" default="citycircuit"/>
   <arg name="config_file" default="$(eval &quot;'config.yaml' if '$(var track)' == 'citycircuit' else 'config_' + '$(var track)' + '.yaml'&quot;)"/>
@@ -14,6 +15,7 @@
     <param name="use_sim_time" value="$(var use_sim_time)"/>
     <param name="use_boost_acceleration" value="false"/>
     <param name="use_obstacle_avoidance" value="$(var use_obstacle_avoidance)"/>
+    <param name="reference_path_csv" value="$(var reference_path_csv)"/>
     <param name="use_stats" value="false"/>
   </node>
 </launch>

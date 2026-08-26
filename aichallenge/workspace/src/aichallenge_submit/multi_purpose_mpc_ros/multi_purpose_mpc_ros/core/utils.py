@@ -20,8 +20,20 @@ def load_waypoints(csv_file_path: str) -> Tuple[List[float], List[float]]:
 
 def load_ref_path(csv_file_path: str):
     df = pd.read_csv(csv_file_path)
-    x = df['x_m'].tolist()
-    y = df['y_m'].tolist()
-    psi = df['psi_rad'].tolist()
-    kappa = df['kappa_radpm'].tolist()
+    if {'x_m', 'y_m', 'psi_rad', 'kappa_radpm'}.issubset(df.columns):
+        x = df['x_m'].tolist()
+        y = df['y_m'].tolist()
+        psi = df['psi_rad'].tolist()
+        kappa = df['kappa_radpm'].tolist()
+    elif {'x', 'y'}.issubset(df.columns):
+        # simple_trajectory_generator's traj.csv. ReferencePath recomputes
+        # heading and curvature from the XY centerline.
+        x = df['x'].tolist()
+        y = df['y'].tolist()
+        psi = [0.0] * len(x)
+        kappa = [0.0] * len(x)
+    else:
+        raise ValueError(
+            f"Unsupported reference path CSV columns in {csv_file_path}: "
+            f"{list(df.columns)}")
     return x, y, psi, kappa
