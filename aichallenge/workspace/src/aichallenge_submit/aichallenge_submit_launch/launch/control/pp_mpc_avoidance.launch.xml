@@ -45,6 +45,7 @@
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
     <arg name="use_obstacle_avoidance" value="true"/>
     <arg name="track" value="$(var track)"/>
+    <arg name="use_raw_reference_path" value="true"/>
     <arg name="publish_control_cmd" value="false"/>
     <arg name="control_cmd_topic" value="/control/command/mpc_unused_cmd"/>
     <arg name="control_cmd_raw_topic" value="/control/command/mpc_unused_cmd_raw"/>

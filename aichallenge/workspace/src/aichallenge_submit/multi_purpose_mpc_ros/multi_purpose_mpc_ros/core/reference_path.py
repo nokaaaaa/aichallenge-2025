@@ -160,7 +160,7 @@ class BorderCells:
 
 class ReferencePath:
     def __init__(self, map, wp_x, wp_y, resolution, smoothing_distance,
-                 max_width, circular):
+                 max_width, circular, use_raw_waypoints=False):
         """
         Reference Path object. Create a reference trajectory from specified
         corner points with given resolution. Smoothing around corners can be
@@ -193,6 +193,7 @@ class ReferencePath:
 
         # Circular flag
         self.circular = circular
+        self.use_raw_waypoints = use_raw_waypoints
 
         # List of waypoint objects
         self.waypoints = self._construct_path(wp_x, wp_y)
@@ -239,6 +240,14 @@ class ReferencePath:
         :param wp_y: y coordinates of waypoints in global coordinates
         :return: list of waypoint objects
         """
+
+        if self.use_raw_waypoints:
+            coordinates = list(zip(wp_x, wp_y))
+            if self.circular and len(coordinates) > 1 and coordinates[-1] == coordinates[0]:
+                coordinates.pop()
+            if self.circular:
+                coordinates.append(coordinates[0])
+            return self._construct_waypoints(coordinates)
 
         if self.circular:
             # insert the first smoothing_distance points to the end of the list

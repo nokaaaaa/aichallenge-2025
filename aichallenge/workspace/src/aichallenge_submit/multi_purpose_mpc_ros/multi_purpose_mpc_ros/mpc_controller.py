@@ -149,6 +149,7 @@ class MPCController(Node):
         self.declare_parameter("use_obstacle_avoidance", False)
         self.declare_parameter("use_stats", False)
         self.declare_parameter("reference_path_csv", "")
+        self.declare_parameter("use_raw_reference_path", False)
         self.declare_parameter("publish_control_cmd", True)
         self.declare_parameter("control_cmd_topic", "/control/command/control_cmd")
         self.declare_parameter("control_cmd_raw_topic", "/control/command/control_cmd_raw")
@@ -159,6 +160,7 @@ class MPCController(Node):
         self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
         self._reference_path_csv = self.get_parameter("reference_path_csv").get_parameter_value().string_value
+        self._use_raw_reference_path = self.get_parameter("use_raw_reference_path").get_parameter_value().bool_value
         self._publish_control_cmd = self.get_parameter("publish_control_cmd").get_parameter_value().bool_value
         self._control_cmd_topic = self.get_parameter("control_cmd_topic").get_parameter_value().string_value
         self._control_cmd_raw_topic = self.get_parameter("control_cmd_raw_topic").get_parameter_value().string_value
@@ -359,7 +361,8 @@ class MPCController(Node):
                     cfg_ref_path.resolution,
                     cfg_ref_path.smoothing_distance,
                     cfg_ref_path.max_width,
-                    cfg_ref_path.circular)
+                    cfg_ref_path.circular,
+                    use_raw_waypoints=self._use_raw_reference_path)
 
             else:
                 print("Using waypoints to create reference path")
