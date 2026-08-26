@@ -23,6 +23,7 @@ reference_path:
   csv_path: "maps/optimized_traj_mincurv.csv"
   resolution: 0.6
   smoothing_distance: 3
+  safety_margin: 0.1
   max_width: 6.0
   circular: true
   use_path_constraints_topic: false
@@ -49,6 +50,6 @@ mpc:
   wp_id_offset: 0
 
 v2x_obstacle_avoidance:
-  vehicle_radius: 0.5          # [m]
+  vehicle_radius: 1.0          # [m]
   v_max_safety: 30.0           # [m/s]
   position_jump_threshold: 5.0 # [m]

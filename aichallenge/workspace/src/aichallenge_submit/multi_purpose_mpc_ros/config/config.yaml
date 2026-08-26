@@ -27,6 +27,7 @@ reference_path:
   resolution: 0.6
   # traj.csv is already densely sampled. Excessive smoothing adds steering lag.
   smoothing_distance: 1
+  safety_margin: 0.1
   max_width: 6.0
   circular: true
   use_path_constraints_topic: false
@@ -109,6 +110,6 @@ mpc:
   # QN: [1000000.0, 1000.0, 10000.0]
 
 v2x_obstacle_avoidance:
-  vehicle_radius: 0.5          # [m]
+  vehicle_radius: 1.6          # [m]
   v_max_safety: 30.0           # [m/s]
   position_jump_threshold: 5.0 # [m]

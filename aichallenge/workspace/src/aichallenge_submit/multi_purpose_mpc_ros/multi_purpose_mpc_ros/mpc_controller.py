@@ -393,11 +393,13 @@ class MPCController(Node):
 
         def create_car(ref_path: ReferencePath) -> BicycleModel:
             cfg_model = self._cfg.bicycle_model # type: ignore
+            cfg_ref_path = self._cfg.reference_path # type: ignore
             return BicycleModel(
                 ref_path,
                 cfg_model.length,
                 cfg_model.width,
-                1.0 / self._cfg.mpc.control_rate) # type: ignore
+                1.0 / self._cfg.mpc.control_rate,
+                cfg_ref_path.safety_margin) # type: ignore
 
         def create_mpc(car: BicycleModel) -> Tuple[MPCConfig, MPC]:
             cfg_mpc = self._cfg.mpc # type: ignore

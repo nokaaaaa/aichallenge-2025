@@ -166,7 +166,8 @@ class PathConstraintsProvider(Node):
                 ref_path,
                 cfg_model.length,
                 cfg_model.width,
-                1.0 / self._cfg.mpc.control_rate) # type: ignore
+                1.0 / self._cfg.mpc.control_rate,
+                self._cfg.reference_path.safety_margin) # type: ignore
 
         def create_mpc(car: BicycleModel) -> Tuple[MPCConfig, MPC]:
             cfg_mpc = self._cfg.mpc # type: ignore
