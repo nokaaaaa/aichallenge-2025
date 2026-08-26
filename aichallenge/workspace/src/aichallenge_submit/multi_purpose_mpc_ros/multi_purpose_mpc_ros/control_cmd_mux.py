@@ -630,7 +630,7 @@ class ControlCmdMux(Node):
         # the same vehicle is still within the 50-waypoint trigger window.
         if self._use_mpc and self._mpc_target_vehicle_id is not None:
             target = relation_by_id.get(self._mpc_target_vehicle_id)
-            if target is not None and target[1] <= self._release_waypoint_count:
+            if target is not None and target[2] <= self._release_waypoint_count:
                 self._completed_overtake_vehicle_id = self._mpc_target_vehicle_id
                 self._mpc_target_vehicle_id = None
                 self._set_mode(False, "ego reached the target vehicle's 10-waypoint window")

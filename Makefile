@@ -84,7 +84,7 @@ dev2 dev3 dev4: simulator
 	echo "Start $$N-vehicle dev (autoware on ROS_DOMAIN_ID 1..$$N via docker compose -p)"; \
 	for p in $$(seq 1 $$N); do \
 		if [ "$@" = "dev3" ] && [ "$$p" = "1" ]; then \
-			LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p CONTROL_METHOD=mpc docker compose -p $$p up -d autoware; \
+			LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p VEHICLE_ID=P1 CONTROL_METHOD=pp_mpc_avoidance docker compose -p $$p up -d autoware; \
 		elif [ "$@" = "dev3" ]; then \
 			LOG_DIR=$(LOG_DIR) ROS_DOMAIN_ID=$$p MAX_TARGET_VELOCITY=5.5555556 docker compose -p $$p up -d autoware; \
 		else \
