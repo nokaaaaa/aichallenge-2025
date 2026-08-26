@@ -97,6 +97,7 @@ class ControlCmdMux(Node):
 
         self._ego_vehicle_id = str(self.get_parameter("ego_vehicle_id").value)
         self._enabled_ego_vehicle_id = str(self.get_parameter("enabled_ego_vehicle_id").value)
+        self._domain_vehicle_id = self._vehicle_id_from_ros_domain_id()
         self._switch_waypoint_count = int(self.get_parameter("switch_waypoint_count").value)
         self._release_waypoint_count = int(self.get_parameter("release_waypoint_count").value)
         self._v2x_stale_timeout = float(self.get_parameter("v2x_stale_timeout").value)
@@ -220,8 +221,13 @@ class ControlCmdMux(Node):
 
     def _v2x_callback(self, msg: V2XVehiclePositionArray) -> None:
         vehicles = []
+        self_ids = {
+            vehicle_id
+            for vehicle_id in (self._ego_vehicle_id, self._domain_vehicle_id)
+            if vehicle_id and vehicle_id != "default"
+        }
         for vehicle in msg.vehicles:
-            if self._ego_vehicle_id and vehicle.vehicle_id == self._ego_vehicle_id:
+            if vehicle.vehicle_id in self_ids:
                 continue
             vehicles.append((
                 vehicle.vehicle_id,
@@ -605,7 +611,7 @@ class ControlCmdMux(Node):
             self._mpc_target_vehicle_id = None
             self._set_mode(False, "P1 uses Pure Pursuit on the MPC predicted trajectory")
             return
-        if self._enabled_ego_vehicle_id and self._ego_vehicle_id != self._enabled_ego_vehicle_id:
+        if not self._is_enabled_ego_vehicle():
             self._mpc_target_vehicle_id = None
             self._set_mode(False, "costmap overtake is disabled for this ego vehicle")
             return
@@ -717,6 +723,25 @@ class ControlCmdMux(Node):
             return
         if self._last_pp_cmd is not None:
             self._pub.publish(self._last_pp_cmd)
+
+    @staticmethod
+    def _vehicle_id_from_ros_domain_id() -> str:
+        domain_id = os.environ.get("ROS_DOMAIN_ID", "")
+        if domain_id.isdigit() and int(domain_id) > 0:
+            return f"d{int(domain_id)}"
+        return ""
+
+    def _is_enabled_ego_vehicle(self) -> bool:
+        if not self._enabled_ego_vehicle_id:
+            return True
+        if self._ego_vehicle_id == self._enabled_ego_vehicle_id:
+            return True
+        if not self._domain_vehicle_id:
+            return False
+        enabled = self._enabled_ego_vehicle_id
+        if enabled.startswith("P") and enabled[1:].isdigit():
+            return self._domain_vehicle_id == f"d{int(enabled[1:])}"
+        return self._domain_vehicle_id == enabled
 
 
 def main(args=None) -> None:
