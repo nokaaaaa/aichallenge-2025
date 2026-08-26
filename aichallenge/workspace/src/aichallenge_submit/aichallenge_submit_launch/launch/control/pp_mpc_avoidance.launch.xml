@@ -40,6 +40,7 @@
     <arg name="input_trajectory_topic" value="/planning/scenario_planning/trajectory"/>
     <arg name="control_cmd_topic" value="/control/command/free_cmd"/>
     <arg name="node_name" value="pure_pursuit_free"/>
+    <arg name="fixed_acceleration" value="3.0"/>
   </include>
 
   <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/pure_pursuit.launch.xml">
@@ -48,6 +49,7 @@
     <arg name="input_trajectory_topic" value="/mpc/predicted_trajectory"/>
     <arg name="control_cmd_topic" value="/control/command/overtake_cmd"/>
     <arg name="node_name" value="pure_pursuit_overtake"/>
+    <arg name="fixed_acceleration" value="-1.0"/>
   </include>
 
   <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/mpc.launch.xml">

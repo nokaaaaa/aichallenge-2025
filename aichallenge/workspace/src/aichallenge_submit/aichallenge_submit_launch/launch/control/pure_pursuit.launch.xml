@@ -8,6 +8,7 @@
   <arg name="input_trajectory_topic" default="/planning/scenario_planning/trajectory"/>
   <arg name="control_cmd_topic" default="/control/command/control_cmd"/>
   <arg name="node_name" default="simple_pure_pursuit_node"/>
+  <arg name="fixed_acceleration" default="-1.0"/>
 
   <let name="steering_tire_angle_gain_var" value="1.50" if="$(var simulation)"/>
   <let name="steering_tire_angle_gain_var" value="1.639" unless="$(var simulation)"/>
@@ -24,6 +25,7 @@
     <param name="speed_proportional_gain" value="1.0"/>
     <param name="steering_tire_angle_gain" value="$(var steering_tire_angle_gain_var)"/>
     <param name="max_acceleration" value="3.0"/>
+    <param name="fixed_acceleration" value="$(var fixed_acceleration)"/>
     <param name="control_delay_sec" value="$(var control_delay_sec_var)"/>
     <param name="max_steering_tire_angle" value="0.64"/>
 

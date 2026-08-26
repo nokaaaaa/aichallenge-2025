@@ -26,6 +26,7 @@ SimplePurePursuit::SimplePurePursuit()
   max_target_velocity_(declare_parameter<float>("max_target_velocity", 0.0)),
   steering_tire_angle_gain_(declare_parameter<float>("steering_tire_angle_gain", 1.0)),
   max_acceleration_(declare_parameter<float>("max_acceleration", 3.0)),
+  fixed_acceleration_(declare_parameter<float>("fixed_acceleration", -1.0)),
   control_delay_sec_(declare_parameter<float>("control_delay_sec", 0.0)),
   max_steering_tire_angle_(declare_parameter<float>("max_steering_tire_angle", 0.64))
 {
@@ -83,6 +84,9 @@ void SimplePurePursuit::onTimer()
   cmd.longitudinal.acceleration =
     speed_proportional_gain_ * (target_longitudinal_vel - current_longitudinal_vel);
   cmd.longitudinal.acceleration = std::min<double>(cmd.longitudinal.acceleration, max_acceleration_);
+  if (fixed_acceleration_ >= 0.0) {
+    cmd.longitudinal.acceleration = fixed_acceleration_;
+  }
 
   // calc lateral control
   //// calc lookahead distance
