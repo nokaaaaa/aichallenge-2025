@@ -49,6 +49,6 @@ mpc:
   wp_id_offset: 0
 
 v2x_obstacle_avoidance:
-  vehicle_radius: 0.5          # [m]
+  vehicle_radius: 1.0          # [m]
   v_max_safety: 30.0           # [m/s]
   position_jump_threshold: 5.0 # [m]

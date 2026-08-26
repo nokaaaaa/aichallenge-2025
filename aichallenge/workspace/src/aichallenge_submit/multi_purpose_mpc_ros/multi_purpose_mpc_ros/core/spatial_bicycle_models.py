@@ -252,7 +252,7 @@ class SpatialBicycleModel(ABC):
         # Keep a fixed clearance from map/obstacle bounds. The vehicle width
         # is already represented by the configured footprint and must not be
         # converted into an additional 1.6 m margin here.
-        safety_margin = 0.5
+        safety_margin = 0.1
 
         return safety_margin
 
