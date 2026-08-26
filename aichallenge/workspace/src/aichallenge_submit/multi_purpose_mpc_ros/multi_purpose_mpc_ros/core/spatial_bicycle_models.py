@@ -249,12 +249,10 @@ class SpatialBicycleModel(ABC):
         Compute safety margin for car if modeled by its center of gravity.
         """
 
-        # Model ellipsoid around the car
-        # safety_margin = self.width
-        # safety_margin = self.width / 2.0
-        safety_margin = self.width / np.sqrt(2)
-        # safety_margin = self.width / np.sqrt(2) / 2.0
-        # safety_margin = 0.0
+        # Keep a fixed clearance from map/obstacle bounds. The vehicle width
+        # is already represented by the configured footprint and must not be
+        # converted into an additional 1.6 m margin here.
+        safety_margin = 0.5
 
         return safety_margin
 

@@ -132,11 +132,11 @@ class MPCController(Node):
     RECOVERY_START_SPEED_KMH = 0.5
     RECOVERY_STARTUP_GRACE_S = 8.0
     RECOVERY_BRAKE_DURATION_S = 0.3
-    RECOVERY_SHIFT_REVERSE_DURATION_S = 0.5
-    RECOVERY_MIN_REVERSE_DURATION_S = 0.5
-    RECOVERY_MAX_REVERSE_DURATION_S = 2.5
-    RECOVERY_MIN_REVERSE_DISTANCE_M = 0.8
-    RECOVERY_PATH_DISTANCE_THRESHOLD_M = 0.8
+    RECOVERY_SHIFT_REVERSE_DURATION_S = 0.25
+    RECOVERY_MIN_REVERSE_DURATION_S = 0.35
+    RECOVERY_MAX_REVERSE_DURATION_S = 1.5
+    RECOVERY_MIN_REVERSE_DISTANCE_M = 0.45
+    RECOVERY_PATH_DISTANCE_THRESHOLD_M = 0.6
     RECOVERY_COOLDOWN_S = 1.0
     RECOVERY_PATH_APPROACH_DISTANCE_M = 2.0
     RECOVERY_MAX_STEERING_RAD = 0.5
@@ -671,7 +671,9 @@ class MPCController(Node):
             self.get_logger().warning(f"Collision detected!")
         self._last_condition = msg.data
 
-    def _update_recovery_state(self, speed_mps: float, command_speed_mps: float, now) -> None:
+    def _update_recovery_state(
+            self, speed_mps: float, command_speed_mps: float,
+            wall_stop_detected: bool, now) -> None:
         """Run the brake, reverse-gear, reverse, and cooldown phases."""
         speed_kmh = abs(speed_mps) * 3.6
         if speed_kmh >= self.RECOVERY_START_SPEED_KMH:
@@ -686,7 +688,11 @@ class MPCController(Node):
                 return
 
         if self._recovery_state == "idle":
-            if self._has_started and speed_kmh <= self.RECOVERY_SPEED_THRESHOLD_KMH and command_speed_mps > 0.2:
+            # Obstacle stopping can make the MPC velocity command zero. Use
+            # the wall/collision indication as an independent trigger so the
+            # recovery is not blocked by the stop command itself.
+            recovery_requested = wall_stop_detected or command_speed_mps > 0.2
+            if self._has_started and speed_kmh <= self.RECOVERY_SPEED_THRESHOLD_KMH and recovery_requested:
                 self._recovery_state = "brake"
                 self._recovery_state_started_at = now
                 self.get_logger().warn(
@@ -969,7 +975,7 @@ class MPCController(Node):
             u, max_delta = self._mpc.get_control()
             # self.get_logger().info(f"u: {u}")
 
-        self._update_recovery_state(v, u[0], now)
+        self._update_recovery_state(v, u[0], is_colliding, now)
         self._apply_recovery_control(u)
 
         if self._ref_vel_configulator is not None:
@@ -1024,7 +1030,12 @@ class MPCController(Node):
         if self._recovery_state == "brake":
             acc = -3.0
         elif self._recovery_state == "reverse":
-            acc = 3.0
+            # Track the reverse speed instead of continuously accelerating.
+            # A fixed positive acceleration caused the vehicle to overspeed
+            # while waiting for the path-distance stop condition.
+            target_speed = kmh_to_m_per_sec(self.RECOVERY_REVERSE_SPEED_KMH)
+            speed_error = target_speed - abs(v)
+            acc = np.clip(2.0 * speed_error, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
         # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
 
         # apply low pass filter to control signal
