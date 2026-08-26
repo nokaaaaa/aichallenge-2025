@@ -23,6 +23,7 @@ reference_path:
   csv_path: "maps/optimized_traj_mincurv.csv"
   resolution: 0.6
   smoothing_distance: 3
+  safety_margin: 0.1
   max_width: 6.0
   circular: true
   use_path_constraints_topic: false

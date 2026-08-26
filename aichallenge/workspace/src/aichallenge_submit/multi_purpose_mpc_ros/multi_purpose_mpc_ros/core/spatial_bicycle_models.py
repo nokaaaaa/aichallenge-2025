@@ -115,7 +115,7 @@ class SimpleSpatialState(SpatialState):
 ####################################
 
 class SpatialBicycleModel(ABC):
-    def __init__(self, reference_path, length, width, Ts):
+    def __init__(self, reference_path, length, width, Ts, safety_margin=0.1):
         """
         Abstract Base Class for Spatial Reformulation of Bicycle Model.
         :param reference_path: reference path object to follow
@@ -130,7 +130,7 @@ class SpatialBicycleModel(ABC):
         # Car Parameters
         self.length = length
         self.width = width
-        self.safety_margin = self._compute_safety_margin()
+        self.safety_margin = self._compute_safety_margin(safety_margin)
 
         # Reference Path
         self.reference_path = reference_path
@@ -244,7 +244,7 @@ class SpatialBicycleModel(ABC):
         # Update distance travelled along reference path
         self.s += s_dot * self.Ts
 
-    def _compute_safety_margin(self):
+    def _compute_safety_margin(self, safety_margin):
         """
         Compute safety margin for car if modeled by its center of gravity.
         """
@@ -252,9 +252,7 @@ class SpatialBicycleModel(ABC):
         # Keep a fixed clearance from map/obstacle bounds. The vehicle width
         # is already represented by the configured footprint and must not be
         # converted into an additional 1.6 m margin here.
-        safety_margin = 0.1
-
-        return safety_margin
+        return max(0.0, float(safety_margin))
 
     def get_current_waypoint(self):
         """
@@ -364,7 +362,7 @@ class SpatialBicycleModel(ABC):
 #################
 
 class BicycleModel(SpatialBicycleModel):
-    def __init__(self, reference_path, length, width, Ts):
+    def __init__(self, reference_path, length, width, Ts, safety_margin=0.1):
         """
         Simplified Spatial Bicycle Model. Spatial Reformulation of Kinematic
         Bicycle Model. Uses Simplified Spatial State.
@@ -376,7 +374,7 @@ class BicycleModel(SpatialBicycleModel):
 
         # Initialize base class
         super(BicycleModel, self).__init__(reference_path, length=length,
-                                           width=width, Ts=Ts)
+                                           width=width, Ts=Ts, safety_margin=safety_margin)
 
         # Initialize spatial state
         self.spatial_state = SimpleSpatialState()

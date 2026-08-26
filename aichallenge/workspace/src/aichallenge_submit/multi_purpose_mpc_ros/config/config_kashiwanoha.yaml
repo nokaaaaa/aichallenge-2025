@@ -26,6 +26,7 @@ reference_path:
   csv_path: "env/kashiwanoha/traj_mincurv.csv"
   resolution: 0.6
   smoothing_distance: 2
+  safety_margin: 0.1
   max_width: 6.0
   circular: true  # kashiwanoha lower-2-cell route is a closed loop
   use_path_constraints_topic: false
