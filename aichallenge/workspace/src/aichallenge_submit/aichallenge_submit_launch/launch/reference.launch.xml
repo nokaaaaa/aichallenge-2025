@@ -21,7 +21,7 @@
   <log message="echo launch param use_sim_time: $(var use_sim_time) launch_vehicle_interface: $(var launch_vehicle_interface) sensor_model: $(var sensor_model)"/>
 
   <!-- Control method -->
-  <arg name="control_method" default="pure_pursuit"
+  <arg name="control_method" default="pp_mpc_avoidance"
       description="Select control: mpc, pure_pursuit, pp_mpc_avoidance, tiny_lidar_net, pilot_net, joycon, rl_train"/>
   <arg name="max_target_velocity" default="0.0"
       description="Pure Pursuit target speed limit in m/s; 0 disables the limit"/>
