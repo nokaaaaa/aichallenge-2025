@@ -21,7 +21,7 @@
   <log message="echo launch param use_sim_time: $(var use_sim_time) launch_vehicle_interface: $(var launch_vehicle_interface) sensor_model: $(var sensor_model)"/>
 
   <!-- Control method -->
-  <arg name="control_method" default="mpc"
+  <arg name="control_method" default="pure_pursuit"
       description="Select control: mpc, pure_pursuit, tiny_lidar_net, pilot_net, joycon, rl_train"/>
 
   <!-- Global parameters -->
@@ -129,7 +129,7 @@
 
       <!-- Customizable -->
       <node pkg="simple_trajectory_generator" exec="simple_trajectory_generator_node" name="simple_trajectory_generator" output="screen">
-            <param name="csv_path" value="$(find-pkg-share simple_trajectory_generator)/data/$(var track_subdir)raceline_awsim_30km_from_garage.csv"/>
+            <param name="csv_path" value="$(find-pkg-share aichallenge_submit_launch)/traj/traj.csv"/>
             <param name="z" value="6.5"/>
       </node>
       
