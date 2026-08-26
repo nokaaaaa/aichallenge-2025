@@ -176,14 +176,20 @@ class MPC:
         Aeq = sparse.hstack([Ax, Bu])
 
         # ステアリングレート制約の行列を構築
-        n_rate_constraints = N - 1
+        # Constrain the first predicted steering input against the steering
+        # actually applied in the previous cycle as well as subsequent input
+        # differences. Without the first constraint, the optimizer predicted
+        # a large steering step that was clipped after solving, so the RViz
+        # prediction did not represent the vehicle motion.
+        n_rate_constraints = N
         steering_rate_matrix = np.zeros((n_rate_constraints, nx_N + nu_N))
 
         # ステアリングレート制約の行列を設定
-        for i in range(n_rate_constraints):
+        steering_rate_matrix[0, nx_N + 1] = 1
+        for i in range(1, n_rate_constraints):
             # 連続する制御入力間の差分に対する係数を設定
-            steering_rate_matrix[i, nx_N + self.nu*i + 1] = -1  # 現在のステア角
-            steering_rate_matrix[i, nx_N + self.nu*(i+1) + 1] = 1  # 次のステア角
+            steering_rate_matrix[i, nx_N + self.nu*(i-1) + 1] = -1
+            steering_rate_matrix[i, nx_N + self.nu*i + 1] = 1
 
         # 制約行列の結合
         A_inequality = sparse.vstack([
@@ -205,8 +211,15 @@ class MPC:
 
         # ステアリングレート制約の境界
         max_delta_change = self.max_steering_rate * self.model.Ts
-        lineq_rate = -max_delta_change * np.ones(n_rate_constraints)
-        uineq_rate = max_delta_change * np.ones(n_rate_constraints)
+        previous_delta = self.previous_steering
+        first_delta_min = max(previous_delta - max_delta_change, -np.arctan(umax[1] * self.model.length))
+        first_delta_max = min(previous_delta + max_delta_change, np.arctan(umax[1] * self.model.length))
+        lineq_rate = np.hstack([
+            np.tan(first_delta_min) / self.model.length,
+            -max_delta_change * np.ones(n_rate_constraints - 1)])
+        uineq_rate = np.hstack([
+            np.tan(first_delta_max) / self.model.length,
+            max_delta_change * np.ones(n_rate_constraints - 1)])
 
         # 全ての境界を結合
         l = np.hstack([leq, lineq_basic, lineq_rate])
@@ -320,7 +333,7 @@ class MPC:
         x_pred, y_pred = [], []
 
         # Iterate over prediction horizon
-        for n in range(2, N):
+        for n in range(N + 1):
             # Get associated waypoint
             associated_waypoint = self.model.reference_path.\
                 get_waypoint(self.model.wp_id+n)

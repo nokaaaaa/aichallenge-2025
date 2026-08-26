@@ -31,6 +31,7 @@
 #include <rviz_common/properties/float_property.hpp>
 #include <rviz_common/properties/int_property.hpp>
 #include <rviz_common/properties/ros_topic_property.hpp>
+#include <std_msgs/msg/string.hpp>
 
 #include <OgreColourValue.h>
 #include <OgreMaterial.h>
@@ -38,6 +39,7 @@
 
 #include <memory>
 #include <mutex>
+#include <string>
 #endif
 
 namespace autoware_overlay_rviz_plugin
@@ -69,6 +71,7 @@ private Q_SLOTS:
   void topic_updated_turn_signals();
   void topic_updated_hazard_lights();
   void topic_updated_traffic();
+  void topic_updated_control_mode();
 
 private:
   std::mutex mutex_;
@@ -94,6 +97,7 @@ private:
   std::unique_ptr<rviz_common::properties::RosTopicProperty> hazard_lights_topic_property_;
   std::unique_ptr<rviz_common::properties::RosTopicProperty> traffic_topic_property_;
   std::unique_ptr<rviz_common::properties::RosTopicProperty> speed_limit_topic_property_;
+  std::unique_ptr<rviz_common::properties::RosTopicProperty> control_mode_topic_property_;
 
   void drawHorizontalRoundedRectangle(QPainter & painter, const QRectF & backgroundRect);
   void drawVerticalRoundedRectangle(QPainter & painter, const QRectF & backgroundRect);
@@ -116,6 +120,7 @@ private:
   rclcpp::Subscription<autoware_perception_msgs::msg::TrafficLightElement>::SharedPtr traffic_sub_;
   rclcpp::Subscription<tier4_planning_msgs::msg::VelocityLimit>::SharedPtr
     speed_limit_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr control_mode_sub_;
 
   std::mutex property_mutex_;
 
@@ -130,7 +135,10 @@ private:
     const tier4_planning_msgs::msg::VelocityLimit::ConstSharedPtr msg);
   void updateTrafficLightData(
     const autoware_perception_msgs::msg::TrafficLightElement::ConstSharedPtr msg);
+  void updateControlModeData(const std_msgs::msg::String::ConstSharedPtr & msg);
   void drawWidget(QImage & hud);
+
+  std::string control_mode_ = "free";
 };
 }  // namespace autoware_overlay_rviz_plugin
 

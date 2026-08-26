@@ -2,4 +2,7 @@
     <class name="autoware_overlay_rviz_plugin/SignalDisplay" type="autoware_overlay_rviz_plugin::SignalDisplay" base_class_type="rviz_common::Display">
         <description>Signal overlay plugin for the 3D view.</description>
     </class>
+    <class name="autoware_overlay_rviz_plugin/ControlModeDisplay" type="autoware_overlay_rviz_plugin::ControlModeDisplay" base_class_type="rviz_common::Display">
+        <description>Control mode overlay plugin for the 3D view.</description>
+    </class>
 </library>

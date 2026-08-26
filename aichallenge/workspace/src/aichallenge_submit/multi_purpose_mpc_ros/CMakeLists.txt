@@ -35,6 +35,7 @@ install(PROGRAMS
   scripts/run_reference_velocity_configulator.bash
   scripts/path_constraints_provider.bash
   scripts/mpc_controller
+  scripts/control_cmd_mux
   scripts/mpc_simulation
   scripts/obstacle_parser.py
   scripts/path_constraints_provider

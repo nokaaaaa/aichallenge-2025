@@ -137,6 +137,11 @@ void SignalDisplay::onInitialize()
     "autoware_perception_msgs/msgs/msg/TrafficLightElement", "Topic for Traffic Light Data", this,
     SLOT(topic_updated_traffic()));
   traffic_topic_property_->initialize(rviz_ros_node);
+
+  control_mode_topic_property_ = std::make_unique<rviz_common::properties::RosTopicProperty>(
+    "Control Mode Topic", "/control/mode", "std_msgs/msg/String",
+    "Topic for the active control mode", this, SLOT(topic_updated_control_mode()));
+  control_mode_topic_property_->initialize(rviz_ros_node);
 }
 
 void SignalDisplay::setupRosSubscriptions()
@@ -148,6 +153,7 @@ void SignalDisplay::setupRosSubscriptions()
   topic_updated_turn_signals();
   topic_updated_hazard_lights();
   topic_updated_traffic();
+  topic_updated_control_mode();
 }
 
 SignalDisplay::~SignalDisplay()
@@ -160,6 +166,7 @@ SignalDisplay::~SignalDisplay()
   speed_sub_.reset();
   turn_signals_sub_.reset();
   hazard_lights_sub_.reset();
+  control_mode_sub_.reset();
   traffic_sub_.reset();
 
   steering_wheel_display_.reset();
@@ -175,6 +182,7 @@ SignalDisplay::~SignalDisplay()
   steering_topic_property_.reset();
   hazard_lights_topic_property_.reset();
   traffic_topic_property_.reset();
+  control_mode_topic_property_.reset();
 }
 
 void SignalDisplay::update(float /* wall_dt */, float /* ros_dt */)
@@ -206,6 +214,7 @@ void SignalDisplay::onDisable()
   speed_sub_.reset();
   turn_signals_sub_.reset();
   hazard_lights_sub_.reset();
+  control_mode_sub_.reset();
 
   if (overlay_) {
     overlay_->hide();
@@ -506,6 +515,23 @@ void SignalDisplay::topic_updated_traffic()
                      [this](const autoware_perception_msgs::msg::TrafficLightElement::SharedPtr msg) {
                        updateTrafficLightData(msg);
                      });
+}
+
+void SignalDisplay::topic_updated_control_mode()
+{
+  control_mode_sub_.reset();
+  auto rviz_ros_node = context_->getRosNodeAbstraction().lock();
+  control_mode_sub_ = rviz_ros_node->get_raw_node()->create_subscription<std_msgs::msg::String>(
+    control_mode_topic_property_->getTopicStd(),
+    rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
+    [this](const std_msgs::msg::String::SharedPtr msg) { updateControlModeData(msg); });
+}
+
+void SignalDisplay::updateControlModeData(const std_msgs::msg::String::ConstSharedPtr & msg)
+{
+  std::lock_guard<std::mutex> lock(property_mutex_);
+  control_mode_ = msg->data;
+  queueRender();
 }
 
 }  // namespace autoware_overlay_rviz_plugin

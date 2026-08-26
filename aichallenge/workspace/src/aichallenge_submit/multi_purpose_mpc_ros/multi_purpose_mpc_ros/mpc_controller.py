@@ -29,7 +29,8 @@ from rclpy.parameter import Parameter
 
 # autoware
 from autoware_auto_control_msgs.msg import AckermannControlCommand
-from autoware_auto_planning_msgs.msg import Trajectory
+from autoware_auto_planning_msgs.msg import Trajectory, TrajectoryPoint
+from autoware_auto_vehicle_msgs.msg import GearCommand
 from v2x_msgs.msg import V2XVehiclePositionArray
 from multi_purpose_mpc_ros.v2x_vehicle_tracker import (
     V2XVehicleTracker,
@@ -126,6 +127,19 @@ class MPCController(Node):
     ANIMATION_INTERVAL = 20
 
     KP = 100.0
+    RECOVERY_SPEED_THRESHOLD_KMH = 1.0
+    RECOVERY_REVERSE_SPEED_KMH = 1.0
+    RECOVERY_START_SPEED_KMH = 0.5
+    RECOVERY_STARTUP_GRACE_S = 8.0
+    RECOVERY_BRAKE_DURATION_S = 0.3
+    RECOVERY_SHIFT_REVERSE_DURATION_S = 0.25
+    RECOVERY_MIN_REVERSE_DURATION_S = 0.35
+    RECOVERY_MAX_REVERSE_DURATION_S = 1.5
+    RECOVERY_MIN_REVERSE_DISTANCE_M = 0.45
+    RECOVERY_PATH_DISTANCE_THRESHOLD_M = 0.6
+    RECOVERY_COOLDOWN_S = 1.0
+    RECOVERY_PATH_APPROACH_DISTANCE_M = 2.0
+    RECOVERY_MAX_STEERING_RAD = 0.5
 
     def __init__(self, config_path: str, ref_vel_config_path: Optional[str]) -> None:
         super().__init__("mpc_controller") # type: ignore
@@ -134,12 +148,22 @@ class MPCController(Node):
         self.declare_parameter("use_boost_acceleration", False)
         self.declare_parameter("use_obstacle_avoidance", False)
         self.declare_parameter("use_stats", False)
+        self.declare_parameter("reference_path_csv", "")
+        self.declare_parameter("use_raw_reference_path", False)
+        self.declare_parameter("publish_control_cmd", True)
+        self.declare_parameter("control_cmd_topic", "/control/command/control_cmd")
+        self.declare_parameter("control_cmd_raw_topic", "/control/command/control_cmd_raw")
 
         # get parameters
         self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
         self.USE_BUG_ACC = self.get_parameter("use_boost_acceleration").get_parameter_value().bool_value
         self.USE_OBSTACLE_AVOIDANCE = self.get_parameter("use_obstacle_avoidance").get_parameter_value().bool_value
         self.use_stats = self.get_parameter("use_stats").get_parameter_value().bool_value
+        self._reference_path_csv = self.get_parameter("reference_path_csv").get_parameter_value().string_value
+        self._use_raw_reference_path = self.get_parameter("use_raw_reference_path").get_parameter_value().bool_value
+        self._publish_control_cmd = self.get_parameter("publish_control_cmd").get_parameter_value().bool_value
+        self._control_cmd_topic = self.get_parameter("control_cmd_topic").get_parameter_value().string_value
+        self._control_cmd_raw_topic = self.get_parameter("control_cmd_raw_topic").get_parameter_value().string_value
 
         self._config_path = config_path
         self._ref_vel_config_path: Optional[str] = ref_vel_config_path
@@ -325,10 +349,11 @@ class MPCController(Node):
         def create_ref_path(map: Map) -> ReferencePath:
             cfg_ref_path = self._cfg.reference_path # type: ignore
 
-            is_ref_path_given = cfg_ref_path.csv_path != "" # type: ignore
+            is_ref_path_given = bool(self._reference_path_csv or cfg_ref_path.csv_path) # type: ignore
             if is_ref_path_given:
                 print("Using given reference path")
-                wp_x, wp_y, _, _ = load_ref_path(self.in_pkg_share(self._cfg.reference_path.csv_path)) # type: ignore
+                reference_path_csv = self._reference_path_csv or self.in_pkg_share(cfg_ref_path.csv_path)
+                wp_x, wp_y, _, _ = load_ref_path(reference_path_csv)
                 return ReferencePath(
                     map,
                     wp_x,
@@ -336,7 +361,8 @@ class MPCController(Node):
                     cfg_ref_path.resolution,
                     cfg_ref_path.smoothing_distance,
                     cfg_ref_path.max_width,
-                    cfg_ref_path.circular)
+                    cfg_ref_path.circular,
+                    use_raw_waypoints=self._use_raw_reference_path)
 
             else:
                 print("Using waypoints to create reference path")
@@ -476,6 +502,12 @@ class MPCController(Node):
         self._last_lap_time = 0.0
         self._lap_times = [None] * (self.MAX_LAPS + 1) # +1 means include lap 0
 
+        # Recover from a wall-induced low-speed state after the vehicle has started.
+        self._has_started = False
+        self._recovery_state = "idle"
+        self._recovery_state_started_at = None
+        self._recovery_reverse_start_xy: Optional[Tuple[float, float]] = None
+
         # condition
         self._last_condition = None
         self._last_colliding_time = None
@@ -500,14 +532,23 @@ class MPCController(Node):
             AckermannControlBoostCommand, "/boost_commander/command", 1)
         else:
           self._command_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd", 1)
+            AckermannControlCommand, self._control_cmd_topic, 1)
           self._command_raw_pub = self.create_publisher(
-            AckermannControlCommand, "/control/command/control_cmd_raw", 1)
+            AckermannControlCommand, self._control_cmd_raw_topic, 1)
           print("use normal ackermann control command")
+        self._gear_pub = self.create_publisher(
+            GearCommand, "/control/command/gear_cmd", 1)
 
         # NOTE:評価環境での可視化のためにダミーのトピック名を使用
         self._mpc_pred_pub = self.create_publisher(
             MarkerArray, "/mpc/prediction", 1)
+        prediction_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self._mpc_trajectory_pub = self.create_publisher(
+            Trajectory, "/mpc/predicted_trajectory", prediction_qos)
         self._mpc_pred_pub_dummy = self.create_publisher(
             MarkerArray, "/planning/scenario_planning/lane_driving/motion_planning/obstacle_stop_planner/virtual_wall", 1)
 
@@ -571,6 +612,8 @@ class MPCController(Node):
         return ackerman_boost_cmd
 
     def _publish_control_command(self, stamp, u, acc, bug_acc_enabled):
+        if not self._publish_control_cmd:
+            return
         cmd = self._create_ackerman_control_command(stamp, u, acc, bug_acc_enabled)
 
         # publish raw control command
@@ -646,6 +689,151 @@ class MPCController(Node):
             self.get_logger().warning(f"Collision detected!")
         self._last_condition = msg.data
 
+    def _update_recovery_state(
+            self, speed_mps: float, command_speed_mps: float,
+            wall_stop_detected: bool, now) -> None:
+        """Run the brake, reverse-gear, reverse, and cooldown phases."""
+        speed_kmh = abs(speed_mps) * 3.6
+        if speed_kmh >= self.RECOVERY_START_SPEED_KMH:
+            self._has_started = True
+
+        # Ignore all low-speed conditions during the startup grace period.
+        # This matches pp-mpc-recovery and prevents initial odometry noise from
+        # selecting REVERSE before the vehicle has actually left the start.
+        if self._recovery_state == "idle":
+            elapsed_from_start = (now - self._t_start).nanoseconds * 1e-9
+            if elapsed_from_start < self.RECOVERY_STARTUP_GRACE_S:
+                return
+
+        if self._recovery_state == "idle":
+            # Obstacle stopping can make the MPC velocity command zero. Use
+            # the wall/collision indication as an independent trigger so the
+            # recovery is not blocked by the stop command itself.
+            recovery_requested = wall_stop_detected or command_speed_mps > 0.2
+            if self._has_started and speed_kmh <= self.RECOVERY_SPEED_THRESHOLD_KMH and recovery_requested:
+                self._recovery_state = "brake"
+                self._recovery_state_started_at = now
+                self.get_logger().warn(
+                    f"Starting reverse recovery: speed={speed_kmh:.2f} km/h")
+            return
+
+        elapsed = (now - self._recovery_state_started_at).nanoseconds * 1e-9
+        if self._recovery_state == "brake" and elapsed >= self.RECOVERY_BRAKE_DURATION_S:
+            self._recovery_state = "shift_reverse"
+            self._recovery_state_started_at = now
+            self._publish_gear(GearCommand.REVERSE)
+        elif self._recovery_state == "shift_reverse" and elapsed >= self.RECOVERY_SHIFT_REVERSE_DURATION_S:
+            self._recovery_state = "reverse"
+            self._recovery_state_started_at = now
+            self._recovery_reverse_start_xy = self._current_xy()
+            self._publish_gear(GearCommand.REVERSE)
+        elif self._recovery_state == "reverse":
+            reverse_distance = self._reverse_distance()
+            path_state = self._nearest_reference_path_state()
+            path_distance = path_state[1] if path_state is not None else float("inf")
+            if (elapsed >= self.RECOVERY_MIN_REVERSE_DURATION_S and
+                    reverse_distance >= self.RECOVERY_MIN_REVERSE_DISTANCE_M and
+                    path_distance <= self.RECOVERY_PATH_DISTANCE_THRESHOLD_M) or \
+                    elapsed >= self.RECOVERY_MAX_REVERSE_DURATION_S:
+                self._recovery_state = "cooldown"
+                self._recovery_state_started_at = now
+                self._publish_gear(GearCommand.DRIVE)
+                self.get_logger().info(
+                    f"Reverse recovery finished: distance={reverse_distance:.2f} m")
+        elif self._recovery_state == "cooldown" and elapsed >= self.RECOVERY_COOLDOWN_S:
+            self._recovery_state = "idle"
+            self._recovery_state_started_at = None
+            self._recovery_reverse_start_xy = None
+            self.get_logger().info("Reverse recovery cooldown finished")
+
+    def _apply_recovery_control(self, u: np.ndarray) -> bool:
+        """Override MPC output during the recovery state machine."""
+        if self._recovery_state == "brake":
+            u[0] = 0.0
+            u[1] = 0.0
+            return True
+        if self._recovery_state == "shift_reverse":
+            u[0] = 0.0
+            u[1] = 0.0
+            self._publish_gear(GearCommand.REVERSE)
+            return True
+        if self._recovery_state != "reverse":
+            return False
+
+        self._publish_gear(GearCommand.REVERSE)
+        path_state = self._nearest_reference_path_state()
+        if path_state is None:
+            steering = 0.0
+        else:
+            path_yaw, _, lateral_error = path_state
+            target_yaw = path_yaw - np.arctan2(
+                lateral_error, self.RECOVERY_PATH_APPROACH_DISTANCE_M)
+            yaw_error = np.arctan2(
+                np.sin(target_yaw - self._car.temporal_state.psi),
+                np.cos(target_yaw - self._car.temporal_state.psi))
+            steering = np.sign(yaw_error) * self.RECOVERY_MAX_STEERING_RAD
+            # Reverse steering uses the opposite sign from forward tracking.
+            steering *= -1.0
+
+        u[0] = kmh_to_m_per_sec(self.RECOVERY_REVERSE_SPEED_KMH)
+        u[1] = steering
+        return True
+
+    def _publish_gear(self, command: int) -> None:
+        if not self._publish_control_cmd:
+            return
+        gear = GearCommand()
+        gear.stamp = self.get_clock().now().to_msg()
+        gear.command = command
+        self._gear_pub.publish(gear)
+
+    def _current_xy(self) -> Tuple[float, float]:
+        return self._car.temporal_state.x, self._car.temporal_state.y
+
+    def _reverse_distance(self) -> float:
+        if self._recovery_reverse_start_xy is None:
+            return 0.0
+        x, y = self._current_xy()
+        return float(np.hypot(x - self._recovery_reverse_start_xy[0],
+                              y - self._recovery_reverse_start_xy[1]))
+
+    def _nearest_reference_path_state(self) -> Optional[Tuple[float, float, float]]:
+        # pp-mpc-recovery uses the actual planning trajectory for its path
+        # approach check. Prefer it over the static MPC reference path.
+        if self._trajectory is not None and len(self._trajectory.points) >= 2:
+            waypoints = [point.pose.position for point in self._trajectory.points]
+            return self._nearest_path_state(waypoints, circular=False)
+
+        waypoints = self._reference_path.waypoints
+        if len(waypoints) < 2:
+            return None
+
+        return self._nearest_path_state(waypoints, circular=self._reference_path.circular)
+
+    def _nearest_path_state(self, waypoints, circular: bool) -> Optional[Tuple[float, float, float]]:
+        if len(waypoints) < 2:
+            return None
+
+        x = self._car.temporal_state.x
+        y = self._car.temporal_state.y
+        segment_count = len(waypoints) if circular else len(waypoints) - 1
+        best = None
+        for i in range(segment_count):
+            p0 = waypoints[i]
+            p1 = waypoints[(i + 1) % len(waypoints)]
+            dx, dy = p1.x - p0.x, p1.y - p0.y
+            length_sq = dx * dx + dy * dy
+            if length_sq <= 1e-6:
+                continue
+            ratio = np.clip(((x - p0.x) * dx + (y - p0.y) * dy) / length_sq, 0.0, 1.0)
+            proj_x, proj_y = p0.x + ratio * dx, p0.y + ratio * dy
+            distance = float(np.hypot(x - proj_x, y - proj_y))
+            lateral_error = (dx * (y - p0.y) - dy * (x - p0.x)) / np.sqrt(length_sq)
+            candidate = (np.arctan2(dy, dx), distance, lateral_error)
+            if best is None or distance < best[1]:
+                best = candidate
+        return best
+
     def _stop_request_callback(self, msg: Empty) -> None:
         if self._enable_control:
             self.get_logger().warn(f"Stop request received {self._enable_control}")
@@ -703,6 +891,36 @@ class MPCController(Node):
             pred_marker_array.markers.append(m) # type: ignore
         self._mpc_pred_pub.publish(pred_marker_array)
         self._mpc_pred_pub_dummy.publish(pred_marker_array)
+
+    def _publish_mpc_trajectory(self, x_pred, y_pred):
+        """Publish the current MPC spatial prediction as a Pure Pursuit path."""
+        if len(x_pred) < 2:
+            return
+
+        trajectory = Trajectory()
+        trajectory.header.stamp = self.get_clock().now().to_msg()
+        trajectory.header.frame_id = "map"
+        for i, (x, y) in enumerate(zip(x_pred, y_pred)):
+            point = TrajectoryPoint()
+            point.pose.position.x = float(x)
+            point.pose.position.y = float(y)
+
+            if i + 1 < len(x_pred):
+                dx = x_pred[i + 1] - x
+                dy = y_pred[i + 1] - y
+            else:
+                dx = x - x_pred[i - 1]
+                dy = y - y_pred[i - 1]
+            yaw = float(np.arctan2(dy, dx))
+            point.pose.orientation.z = float(np.sin(yaw * 0.5))
+            point.pose.orientation.w = float(np.cos(yaw * 0.5))
+
+            waypoint = self._mpc.model.reference_path.get_waypoint(
+                self._mpc.model.wp_id + i)
+            point.longitudinal_velocity_mps = float(max(0.0, waypoint.v_ref or 0.0))
+            trajectory.points.append(point)
+
+        self._mpc_trajectory_pub.publish(trajectory)
 
     def _publish_ref_path_marker(self, ref_path: ReferencePath):
         WP_SPHERE_ENABLED = False
@@ -807,6 +1025,9 @@ class MPCController(Node):
             u, max_delta = self._mpc.get_control()
             # self.get_logger().info(f"u: {u}")
 
+        self._update_recovery_state(v, u[0], is_colliding, now)
+        self._apply_recovery_control(u)
+
         if self._ref_vel_configulator is not None:
             ref_vel_mps = self._ref_vel_configulator.get_ref_vel(self._mpc.model.wp_id)
             ref_vel_kmph = min(
@@ -853,6 +1074,18 @@ class MPCController(Node):
             acc =  self.KP * (u[0] - v)
             # print(f"v: {v}, u[0]: {u[0]}, acc: {acc}")
             acc = np.clip(acc, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
+
+        # Recovery uses the same explicit acceleration as pp-mpc-recovery so
+        # the vehicle can overcome the normal low-speed limiter.
+        if self._recovery_state == "brake":
+            acc = -3.0
+        elif self._recovery_state == "reverse":
+            # Track the reverse speed instead of continuously accelerating.
+            # A fixed positive acceleration caused the vehicle to overspeed
+            # while waiting for the path-distance stop condition.
+            target_speed = kmh_to_m_per_sec(self.RECOVERY_REVERSE_SPEED_KMH)
+            speed_error = target_speed - abs(v)
+            acc = np.clip(2.0 * speed_error, self._mpc_cfg.a_min, self._mpc_cfg.a_max)
         # u[0] = np.clip(last_u[0] + acc * dt, 0.0, self._mpc_cfg.v_max)
 
         # apply low pass filter to control signal
@@ -877,6 +1110,9 @@ class MPCController(Node):
         if (self._mpc.current_prediction is not None) and (self._loop % (self._mpc_cfg.control_rate // 4) == 0):
             self._publish_mpc_pred_marker(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
 
+        if self._mpc.current_prediction is not None:
+            self._publish_mpc_trajectory(self._mpc.current_prediction[0], self._mpc.current_prediction[1]) # type: ignore
+
     def run(self) -> None:
         self._wait_until_clock_received()
         self._wait_until_odom_received()
@@ -888,8 +1124,9 @@ class MPCController(Node):
         self._car.update_states(pose.x, pose.y, pose.theta)
         self._car.update_reference_path(self._car.reference_path)
 
-        if self._ref_vel_configulator is None:
-            self._publish_ref_path_marker(self._car.reference_path)
+        # Keep the MPC reference path visible even when the reference velocity
+        # configurator is active.
+        self._publish_ref_path_marker(self._car.reference_path)
 
         self._pred_marker_color = CYAN
 
@@ -927,7 +1164,8 @@ class MPCController(Node):
 
         # Publish zero command to stop the car completely
         zero_cmd = self._create_ackerman_control_command(self.get_clock().now(), [0.0, 0.0], 0.0, False)
-        self._command_pub.publish(zero_cmd)
+        if self._publish_control_cmd:
+            self._command_pub.publish(zero_cmd)
 
         self.get_logger().warn(">> Stop Completed!")
 

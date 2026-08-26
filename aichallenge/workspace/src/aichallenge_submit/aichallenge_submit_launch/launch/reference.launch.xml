@@ -22,7 +22,7 @@
 
   <!-- Control method -->
   <arg name="control_method" default="pure_pursuit"
-      description="Select control: mpc, pure_pursuit, tiny_lidar_net, pilot_net, joycon, rl_train"/>
+      description="Select control: mpc, pure_pursuit, pp_mpc_avoidance, tiny_lidar_net, pilot_net, joycon, rl_train"/>
   <arg name="max_target_velocity" default="0.0"
       description="Pure Pursuit target speed limit in m/s; 0 disables the limit"/>
 
@@ -149,6 +149,14 @@
 
   <group if="$(eval &quot;'$(var control_method)' == 'mpc'&quot;)">
     <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/mpc.launch.xml">
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+      <arg name="track" value="$(var track)"/>
+    </include>
+  </group>
+
+  <group if="$(eval &quot;'$(var control_method)' == 'pp_mpc_avoidance'&quot;)">
+    <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/pp_mpc_avoidance.launch.xml">
+      <arg name="simulation" value="$(var simulation)"/>
       <arg name="use_sim_time" value="$(var use_sim_time)"/>
       <arg name="track" value="$(var track)"/>
     </include>

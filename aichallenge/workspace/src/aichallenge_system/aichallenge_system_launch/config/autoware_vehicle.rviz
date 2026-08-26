@@ -115,6 +115,19 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /map/vector_map_marker
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: MPC Reference Path
+      Namespaces:
+        ref_path: true
+        ref_path_point: true
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /mpc/ref_path
+      Value: true
     - Alpha: 0.9990000128746033
       Axes Length: 0.0010000000474974513
       Axes Radius: 0.30000001192092896
