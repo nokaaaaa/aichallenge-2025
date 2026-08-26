@@ -110,6 +110,6 @@ mpc:
   # QN: [1000000.0, 1000.0, 10000.0]
 
 v2x_obstacle_avoidance:
-  vehicle_radius: 1.0          # [m]
+  vehicle_radius: 1.6          # [m]
   v_max_safety: 30.0           # [m/s]
   position_jump_threshold: 5.0 # [m]
