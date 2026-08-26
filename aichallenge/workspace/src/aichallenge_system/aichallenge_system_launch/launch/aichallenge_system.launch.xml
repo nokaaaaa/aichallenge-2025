@@ -9,6 +9,7 @@
     <arg name="rosbag" default="false"/>
     <arg name="domain_id" default="0"/>
     <arg name="control_method" default="pure_pursuit"/>
+    <arg name="max_target_velocity" default="0.0"/>
 
     <let name="domain_id" value="$(var domain_id)"/>
     <let name="rviz_config" value="$(find-pkg-share aichallenge_system_launch)/config/autoware_vehicle.rviz"/>
@@ -33,6 +34,7 @@
         <arg name="sensor_model" value="$(var sensor_model)"/>
         <arg name="launch_vehicle_interface" value="$(var launch_vehicle_interface)"/>
         <arg name="control_method" value="$(var control_method)"/>
+        <arg name="max_target_velocity" value="$(var max_target_velocity)"/>
     </include>
 
     <!-- Visualization. -->

@@ -2,6 +2,7 @@
 <launch>
   <arg name="simulation" default="true"/>
   <arg name="use_sim_time" default="true"/>
+  <arg name="max_target_velocity" default="0.0"/>
 
   <let name="steering_tire_angle_gain_var" value="1.50" if="$(var simulation)"/>
   <let name="steering_tire_angle_gain_var" value="1.639" unless="$(var simulation)"/>
@@ -12,6 +13,7 @@
     <param name="wheel_base" value="1.087"/>
     <param name="use_external_target_vel" value="false"/>
     <param name="external_target_vel" value="10.0"/>
+    <param name="max_target_velocity" value="$(var max_target_velocity)"/>
     <param name="lookahead_gain" value="0.35"/>
     <param name="lookahead_min_distance" value="2.0"/>
     <param name="speed_proportional_gain" value="1.0"/>

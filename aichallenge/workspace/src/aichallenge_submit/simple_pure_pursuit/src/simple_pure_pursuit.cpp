@@ -23,6 +23,7 @@ SimplePurePursuit::SimplePurePursuit()
   speed_proportional_gain_(declare_parameter<float>("speed_proportional_gain", 1.0)),
   use_external_target_vel_(declare_parameter<bool>("use_external_target_vel", false)),
   external_target_vel_(declare_parameter<float>("external_target_vel", 0.0)),
+  max_target_velocity_(declare_parameter<float>("max_target_velocity", 0.0)),
   steering_tire_angle_gain_(declare_parameter<float>("steering_tire_angle_gain", 1.0)),
   max_acceleration_(declare_parameter<float>("max_acceleration", 3.0)),
   control_delay_sec_(declare_parameter<float>("control_delay_sec", 0.0)),
@@ -73,6 +74,9 @@ void SimplePurePursuit::onTimer()
   // calc longitudinal speed and acceleration
   double target_longitudinal_vel =
     use_external_target_vel_ ? external_target_vel_ : closet_traj_point.longitudinal_velocity_mps;
+  if (max_target_velocity_ > 0.0) {
+    target_longitudinal_vel = std::min(target_longitudinal_vel, max_target_velocity_);
+  }
   double current_longitudinal_vel = odometry_->twist.twist.linear.x;
 
   cmd.longitudinal.speed = target_longitudinal_vel;

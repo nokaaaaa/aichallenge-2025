@@ -5,6 +5,7 @@
   <arg name="sensor_model"/>
   <arg name="launch_vehicle_interface"/>
   <arg name="control_method" default="pure_pursuit"/>
+  <arg name="max_target_velocity" default="0.0"/>
 
   <log message="The arguments for aichallenge_submit_launch."/>
   <log message=" - simulation: $(var simulation)"/>
@@ -21,5 +22,6 @@
     <arg name="simulation" value="$(var simulation)"/>
     <arg name="launch_vehicle_interface" value="$(var launch_vehicle_interface)"/>
     <arg name="control_method" value="$(var control_method)"/>
+    <arg name="max_target_velocity" value="$(var max_target_velocity)"/>
   </include>
 </launch>

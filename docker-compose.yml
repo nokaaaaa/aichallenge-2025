@@ -16,6 +16,7 @@ x-autoware-base: &autoware-base
     - RUN_MODE=${RUN_MODE:-}
     - SIM_MODE=${SIM_MODE:-}
     - CONTROL_METHOD=${CONTROL_METHOD:-}
+    - MAX_TARGET_VELOCITY=${MAX_TARGET_VELOCITY:-}
     - CMD=${CMD:-}
     - COLCON_TRACE=${COLCON_TRACE:-}
     - ROS_HOME=${ROS_HOME:-}

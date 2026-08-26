@@ -29,6 +29,9 @@ export ROS_DOMAIN_ID=$id
 if [ -n "${CONTROL_METHOD:-}" ]; then
     opts+=("control_method:=${CONTROL_METHOD}")
 fi
+if [ -n "${MAX_TARGET_VELOCITY:-}" ]; then
+    opts+=("max_target_velocity:=${MAX_TARGET_VELOCITY}")
+fi
 
 mkdir -p "${out_dir}"
 exec >"${out_dir}/autoware.log" 2>&1
