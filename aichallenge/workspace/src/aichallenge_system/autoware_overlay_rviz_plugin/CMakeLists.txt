@@ -7,6 +7,7 @@ ament_auto_find_build_dependencies()
 
 set(headers_to_moc
   include/signal_display.hpp
+  include/control_mode_display.hpp
 )
 
 set(headers_to_not_moc
@@ -26,6 +27,7 @@ endforeach()
 set(display_source_files
   src/overlay_utils.cpp
   src/signal_display.cpp
+  src/control_mode_display.cpp
   src/steering_wheel_display.cpp
   src/gear_display.cpp
   src/speed_display.cpp

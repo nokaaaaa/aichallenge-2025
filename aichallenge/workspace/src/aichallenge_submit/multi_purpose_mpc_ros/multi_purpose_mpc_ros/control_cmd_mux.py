@@ -8,13 +8,18 @@ from typing import List, Optional, Tuple
 import rclpy
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.qos import (
+    QoSDurabilityPolicy,
+    QoSHistoryPolicy,
+    QoSProfile,
+    QoSReliabilityPolicy,
+)
 
 from autoware_auto_control_msgs.msg import AckermannControlCommand
 from autoware_auto_planning_msgs.msg import Trajectory
 from autoware_auto_vehicle_msgs.msg import GearCommand
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32, String
 from v2x_msgs.msg import V2XVehiclePositionArray
 
 from multi_purpose_mpc_ros.v2x_vehicle_tracker import (
@@ -40,6 +45,7 @@ class ControlCmdMux(Node):
         self.declare_parameter("pure_pursuit_cmd_topic", "/control/command/pure_pursuit_cmd")
         self.declare_parameter("mpc_cmd_topic", "/control/command/mpc_cmd")
         self.declare_parameter("output_cmd_topic", "/control/command/control_cmd")
+        self.declare_parameter("mode_topic", "/control/mode")
         self.declare_parameter("gear_cmd_topic", "/control/command/gear_cmd")
         self.declare_parameter("kinematics_topic", "/localization/kinematic_state")
         self.declare_parameter("trajectory_topic", "/planning/scenario_planning/trajectory")
@@ -82,6 +88,7 @@ class ControlCmdMux(Node):
         pp_topic = str(self.get_parameter("pure_pursuit_cmd_topic").value)
         mpc_topic = str(self.get_parameter("mpc_cmd_topic").value)
         output_topic = str(self.get_parameter("output_cmd_topic").value)
+        mode_topic = str(self.get_parameter("mode_topic").value)
         gear_cmd_topic = str(self.get_parameter("gear_cmd_topic").value)
         kinematics_topic = str(self.get_parameter("kinematics_topic").value)
         trajectory_topic = str(self.get_parameter("trajectory_topic").value)
@@ -142,6 +149,7 @@ class ControlCmdMux(Node):
         self._last_v2x_time = None
         self._use_mpc = False
         self._mpc_target_vehicle_id: Optional[str] = None
+        self._completed_overtake_vehicle_id: Optional[str] = None
         self._last_pp_cmd: Optional[AckermannControlCommand] = None
         self._last_mpc_cmd: Optional[AckermannControlCommand] = None
         self._last_pp_cmd_time = None
@@ -164,6 +172,13 @@ class ControlCmdMux(Node):
 
         self._pub = self.create_publisher(AckermannControlCommand, output_topic, 1)
         self._gear_pub = self.create_publisher(GearCommand, gear_cmd_topic, 1)
+        mode_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self._mode_pub = self.create_publisher(String, mode_topic, mode_qos)
         self.create_subscription(AckermannControlCommand, pp_topic, self._pp_cmd_callback, 1)
         self.create_subscription(AckermannControlCommand, mpc_topic, self._mpc_cmd_callback, 1)
         self.create_subscription(Odometry, kinematics_topic, self._odom_callback, 1)
@@ -176,6 +191,7 @@ class ControlCmdMux(Node):
         self.create_subscription(V2XVehiclePositionArray, v2x_topic, self._v2x_callback, 1)
         self.create_subscription(Int32, condition_topic, self._condition_callback, 1)
         self.create_timer(0.1, self._on_timer)
+        self._publish_mode("free")
 
         self.get_logger().info(
             f"Control mux started: PP='{pp_topic}', MPC='{mpc_topic}', output='{output_topic}', "
@@ -238,6 +254,7 @@ class ControlCmdMux(Node):
             if self._recovery_cooldown_until is not None and self.get_clock().now() < self._recovery_cooldown_until:
                 return
             self._recovery_state = RecoveryState.IDLE
+            self._publish_mode("overtake" if self._use_mpc else "free")
             self.get_logger().info("Recovery finished; resuming selected controller")
             self._publish_gear(GearCommand.DRIVE)
             cmd = (
@@ -309,6 +326,7 @@ class ControlCmdMux(Node):
             return
         now = self.get_clock().now()
         self._recovery_state = RecoveryState.BRAKE
+        self._publish_mode("recovery")
         self._recovery_brake_until = now + Duration(seconds=self._recovery_brake_duration)
         self._recovery_shift_reverse_until = (
             self._recovery_brake_until + Duration(seconds=self._recovery_shift_reverse_duration)
@@ -601,8 +619,29 @@ class ControlCmdMux(Node):
         relations = self._vehicle_waypoint_relations(ego_x, ego_y)
         if not relations:
             self._mpc_target_vehicle_id = None
+            self._completed_overtake_vehicle_id = None
             self._set_mode(False, "no nearby V2X vehicles")
             return
+
+        relation_by_id = {relation[0]: relation for relation in relations}
+
+        # Once the ego vehicle reaches the target vehicle's 10-waypoint
+        # window, leave overtake mode. Do not immediately re-enter it while
+        # the same vehicle is still within the 50-waypoint trigger window.
+        if self._use_mpc and self._mpc_target_vehicle_id is not None:
+            target = relation_by_id.get(self._mpc_target_vehicle_id)
+            if target is not None and target[1] <= self._release_waypoint_count:
+                self._completed_overtake_vehicle_id = self._mpc_target_vehicle_id
+                self._mpc_target_vehicle_id = None
+                self._set_mode(False, "ego reached the target vehicle's 10-waypoint window")
+                return
+
+        if self._completed_overtake_vehicle_id is not None:
+            completed = relation_by_id.get(self._completed_overtake_vehicle_id)
+            if completed is not None and completed[1] <= self._switch_waypoint_count:
+                self._set_mode(False, "waiting for the completed target to clear")
+                return
+            self._completed_overtake_vehicle_id = None
 
         switch_candidate = min(
             (
@@ -619,24 +658,6 @@ class ControlCmdMux(Node):
                 True,
                 f"vehicle '{vehicle_id}' is {vehicle_ahead_distance} waypoints ahead")
             return
-
-        if self._use_mpc and self._mpc_target_vehicle_id:
-            target = next(
-                (
-                    relation for relation in relations
-                    if relation[0] == self._mpc_target_vehicle_id
-                ),
-                None,
-            )
-            if target is not None:
-                vehicle_id, _vehicle_ahead_distance, ego_ahead_distance = target
-                if ego_ahead_distance < self._release_waypoint_count:
-                    return
-                self._mpc_target_vehicle_id = None
-                self._set_mode(
-                    False,
-                    f"ego passed vehicle '{vehicle_id}' by {ego_ahead_distance} waypoints")
-                return
 
         self._mpc_target_vehicle_id = None
         self._set_mode(False, "no vehicle within switch range")
@@ -674,12 +695,16 @@ class ControlCmdMux(Node):
         self._use_mpc = use_mpc
         if not use_mpc:
             self._mpc_target_vehicle_id = None
-        mode = "MPC" if use_mpc else "Pure Pursuit"
+        mode = "overtake" if use_mpc else "free"
+        self._publish_mode(mode)
         self.get_logger().info(f"Switched to {mode}: {reason}")
 
         cmd = self._last_mpc_cmd if use_mpc and self._has_fresh_mpc_cmd() else self._last_pp_cmd
         if cmd is not None:
             self._pub.publish(cmd)
+
+    def _publish_mode(self, mode: str) -> None:
+        self._mode_pub.publish(String(data=mode))
 
     def _has_fresh_mpc_cmd(self) -> bool:
         if self._last_mpc_cmd is None or self._last_mpc_cmd_time is None:

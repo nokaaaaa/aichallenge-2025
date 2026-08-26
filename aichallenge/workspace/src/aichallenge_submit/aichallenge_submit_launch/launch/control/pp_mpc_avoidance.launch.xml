@@ -3,8 +3,8 @@
   <arg name="simulation" default="true"/>
   <arg name="use_sim_time" default="true"/>
   <arg name="track" default="citycircuit"/>
-  <arg name="switch_waypoint_count" default="30"/>
-  <arg name="release_waypoint_count" default="5"/>
+  <arg name="switch_waypoint_count" default="50"/>
+  <arg name="release_waypoint_count" default="10"/>
   <arg name="v2x_stale_timeout" default="0.5"/>
   <arg name="ego_vehicle_id" default="$(env VEHICLE_ID default)"/>
   <arg name="enabled_ego_vehicle_id" default="P1"/>
@@ -37,8 +37,17 @@
   <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/pure_pursuit.launch.xml">
     <arg name="simulation" value="$(var simulation)"/>
     <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="input_trajectory_topic" value="/planning/scenario_planning/trajectory"/>
+    <arg name="control_cmd_topic" value="/control/command/free_cmd"/>
+    <arg name="node_name" value="pure_pursuit_free"/>
+  </include>
+
+  <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/pure_pursuit.launch.xml">
+    <arg name="simulation" value="$(var simulation)"/>
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
     <arg name="input_trajectory_topic" value="/mpc/predicted_trajectory"/>
-    <arg name="control_cmd_topic" value="/control/command/pure_pursuit_cmd"/>
+    <arg name="control_cmd_topic" value="/control/command/overtake_cmd"/>
+    <arg name="node_name" value="pure_pursuit_overtake"/>
   </include>
 
   <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/mpc.launch.xml">
@@ -53,9 +62,10 @@
 
   <node pkg="multi_purpose_mpc_ros" exec="control_cmd_mux" name="control_cmd_mux" output="screen">
     <param name="use_sim_time" value="$(var use_sim_time)"/>
-    <param name="pure_pursuit_cmd_topic" value="/control/command/pure_pursuit_cmd"/>
-    <param name="mpc_cmd_topic" value="/control/command/mpc_cmd"/>
+    <param name="pure_pursuit_cmd_topic" value="/control/command/free_cmd"/>
+    <param name="mpc_cmd_topic" value="/control/command/overtake_cmd"/>
     <param name="output_cmd_topic" value="/control/command/control_cmd"/>
+    <param name="mode_topic" value="/control/mode"/>
     <param name="gear_cmd_topic" value="/control/command/gear_cmd"/>
     <param name="kinematics_topic" value="/localization/kinematic_state"/>
     <param name="trajectory_topic" value="/planning/scenario_planning/trajectory"/>
@@ -66,7 +76,7 @@
     <param name="release_waypoint_count" value="$(var release_waypoint_count)"/>
     <param name="v2x_stale_timeout" value="$(var v2x_stale_timeout)"/>
     <param name="mpc_cmd_timeout" value="0.3"/>
-    <param name="pure_pursuit_only" value="true"/>
+    <param name="pure_pursuit_only" value="false"/>
     <param name="enable_recovery" value="$(var enable_recovery)"/>
     <param name="stuck_speed_threshold" value="$(var stuck_speed_threshold)"/>
     <param name="stuck_command_speed_threshold" value="$(var stuck_command_speed_threshold)"/>

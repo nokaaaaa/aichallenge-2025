@@ -7,13 +7,14 @@
   <arg name="external_target_vel" default="0.0"/>
   <arg name="input_trajectory_topic" default="/planning/scenario_planning/trajectory"/>
   <arg name="control_cmd_topic" default="/control/command/control_cmd"/>
+  <arg name="node_name" default="simple_pure_pursuit_node"/>
 
   <let name="steering_tire_angle_gain_var" value="1.50" if="$(var simulation)"/>
   <let name="steering_tire_angle_gain_var" value="1.639" unless="$(var simulation)"/>
   <let name="control_delay_sec_var" value="0.12" if="$(var simulation)"/>
   <let name="control_delay_sec_var" value="0.18" unless="$(var simulation)"/>
 
-  <node pkg="simple_pure_pursuit" exec="simple_pure_pursuit" name="simple_pure_pursuit_node" output="screen">
+  <node pkg="simple_pure_pursuit" exec="simple_pure_pursuit" name="$(var node_name)" output="screen">
     <param name="wheel_base" value="1.087"/>
     <param name="use_external_target_vel" value="$(var use_external_target_vel)"/>
     <param name="external_target_vel" value="$(var external_target_vel)"/>

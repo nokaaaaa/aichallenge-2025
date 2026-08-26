@@ -519,6 +519,14 @@ Visualization Manager:
           Turn Signals Topic: /vehicle/status/turn_indicators_status
           Value: true
           Width: 550
+        - Class: autoware_overlay_rviz_plugin/ControlModeDisplay
+          Enabled: true
+          Name: ControlModeDisplay
+          Control Mode Topic: /control/mode
+          Center X: 340
+          Top: 10
+          Width: 130
+          Height: 80
         - Alpha: 0.9990000128746033
           Class: rviz_plugins/VelocityHistory
           Color Border Vel Max: 10
