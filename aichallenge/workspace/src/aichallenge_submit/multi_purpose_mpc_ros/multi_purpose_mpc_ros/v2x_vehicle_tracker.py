@@ -8,11 +8,41 @@ and reusable from non-ROS contexts (e.g. offline replay of rosbag CSVs).
 
 import math
 from collections import deque
-from typing import Deque, Dict, List, Tuple
+from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
 
 def _stamp_to_seconds(stamp) -> float:
     return float(stamp.sec) + float(stamp.nanosec) * 1e-9
+
+
+def _point_xy(point) -> Tuple[float, float]:
+    if hasattr(point, "pose"):
+        position = point.pose.position
+    elif hasattr(point, "position"):
+        position = point.position
+    else:
+        return float(point[0]), float(point[1])
+    return float(position.x), float(position.y)
+
+
+def nearest_waypoint_index(points: Sequence, x: float, y: float) -> Optional[int]:
+    """Return the waypoint index nearest to ``(x, y)``."""
+    nearest_idx = None
+    nearest_dist_sq = float("inf")
+    for idx, point in enumerate(points):
+        px, py = _point_xy(point)
+        dist_sq = (px - x) ** 2 + (py - y) ** 2
+        if dist_sq < nearest_dist_sq:
+            nearest_idx = idx
+            nearest_dist_sq = dist_sq
+    return nearest_idx
+
+
+def forward_waypoint_distance(from_index: int, to_index: int, waypoint_count: int) -> int:
+    """Return how many waypoints ahead ``to_index`` is on a circular path."""
+    if waypoint_count <= 0:
+        raise ValueError("waypoint_count must be positive")
+    return ((to_index % waypoint_count) - (from_index % waypoint_count)) % waypoint_count
 
 
 class V2XVehicleTracker:

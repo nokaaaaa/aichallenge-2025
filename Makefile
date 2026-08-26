@@ -71,6 +71,7 @@ zenoh:
 	docker compose up -d zenoh
 
 dev: SIM_MODE := dev
+dev: export CONTROL_METHOD := pp_mpc_avoidance
 dev: simulator autoware-simulator
 	@echo "Start dev simulation (AWSIM + Autoware)"
 	@echo "To stop: make down  (docker compose down --remove-orphans)"
