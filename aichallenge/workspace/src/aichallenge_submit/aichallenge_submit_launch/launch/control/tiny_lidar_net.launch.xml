@@ -3,7 +3,7 @@
   <arg name="use_sim_time" default="true"/>
   <arg name="scan_topic" default="/sensing/lidar/scan"/>
   <arg name="odometry_topic" default="/localization/kinematic_state"/>
-  <arg name="model_path" default="$(find-pkg-share tiny_lidar_net_controller)/ckpt/ppo_kart_lidar.zip"/>
+  <arg name="model_path" default="/aichallenge/ml_workspace/kart_rl/models/ppo_kart_lidar_policy.npz"/>
 
   <include file="$(find-pkg-share tiny_lidar_net_controller)/launch/tiny_lidar_net.launch.xml">
     <arg name="model_path" value="$(var model_path)"/>

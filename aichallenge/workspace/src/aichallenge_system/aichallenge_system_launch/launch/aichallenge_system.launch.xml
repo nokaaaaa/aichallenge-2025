@@ -24,6 +24,7 @@
     <log message=" - capture: $(var capture)"/>
     <log message=" - rosbag: $(var rosbag)"/>
     <log message=" - domain_id: $(var domain_id)"/>
+    <log message=" - control_method: $(var control_method)"/>
 
     <!-- Main module of AI challenge 2025. -->
     <include file="$(find-pkg-share aichallenge_submit_launch)/launch/aichallenge_submit.launch.xml" >

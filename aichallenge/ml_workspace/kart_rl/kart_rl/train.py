@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
@@ -47,6 +48,17 @@ def build_model(config, env):
     raise ValueError(f"Unsupported algorithm: {algo}")
 
 
+def export_ppo_policy_npz(model: PPO, model_path: Path) -> Path:
+    policy_path = model_path.with_name(f"{model_path.name}_policy.npz")
+    state = {
+        key: value.detach().cpu().numpy()
+        for key, value in model.policy.state_dict().items()
+        if key.startswith(("mlp_extractor.policy_net.", "action_net."))
+    }
+    np.savez(policy_path, **state)
+    return policy_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
@@ -74,6 +86,9 @@ def main() -> None:
     model_path = resolve_path(train_cfg["model_path"], config)
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
     model.save(str(model_path))
+    if train_cfg.get("algorithm", "ppo").lower() == "ppo":
+        policy_path = export_ppo_policy_npz(model, Path(model_path))
+        print(f"Saved policy: {policy_path}")
     env.close()
     print(f"Saved model: {model_path}.zip")
 

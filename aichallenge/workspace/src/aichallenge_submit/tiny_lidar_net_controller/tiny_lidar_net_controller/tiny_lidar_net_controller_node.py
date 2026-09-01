@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import math
 import time
 
 import numpy as np
@@ -9,31 +8,39 @@ import numpy as np
 import rclpy
 from autoware_auto_control_msgs.msg import AckermannControlCommand
 from nav_msgs.msg import Odometry
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 
-try:
-    from stable_baselines3 import PPO
-except ImportError as exc:  # pragma: no cover - import guard for runtime environments
-    raise RuntimeError(
-        "stable-baselines3 is required to run the PPO controller. "
-        "Install it in the ROS runtime environment or run this node in the kart_rl uv environment."
-    ) from exc
+
+class NumpyPpoPolicy:
+    """Deterministic SB3 MlpPolicy actor exported by kart_rl.train."""
+
+    def __init__(self, path: str):
+        weights = np.load(path)
+        self.w0 = weights["mlp_extractor.policy_net.0.weight"].astype(np.float32)
+        self.b0 = weights["mlp_extractor.policy_net.0.bias"].astype(np.float32)
+        self.w2 = weights["mlp_extractor.policy_net.2.weight"].astype(np.float32)
+        self.b2 = weights["mlp_extractor.policy_net.2.bias"].astype(np.float32)
+        self.wa = weights["action_net.weight"].astype(np.float32)
+        self.ba = weights["action_net.bias"].astype(np.float32)
+        self.input_dim = int(self.w0.shape[1])
+
+    def predict(self, obs: np.ndarray) -> np.ndarray:
+        x = np.tanh(self.w0 @ obs + self.b0)
+        x = np.tanh(self.w2 @ x + self.b2)
+        return np.clip(self.wa @ x + self.ba, -1.0, 1.0)
 
 
 class TinyLidarNetNode(Node):
-    """PPO controller that turns point cloud input into Ackermann commands."""
+    """PPO LiDAR controller that publishes Ackermann commands."""
 
     def __init__(self):
         super().__init__("tiny_lidar_net_node")
 
         self.declare_parameter("log_interval_sec", 5.0)
-        self.declare_parameter("use_sim_time", True)
         self.declare_parameter("model.path", "")
-        self.declare_parameter("model.device", "cpu")
-        self.declare_parameter("lidar.angle_min", -1.5666074752807617)
-        self.declare_parameter("lidar.angle_max", 1.5707963705062866)
         self.declare_parameter("lidar.range_min", 0.0)
         self.declare_parameter("lidar.range_max", 25.0)
         self.declare_parameter("scan.topic", "/sensing/lidar/scan")
@@ -56,8 +63,6 @@ class TinyLidarNetNode(Node):
         self.max_brake = float(self.get_parameter("vehicle.max_brake_mps2").value)
         self.max_steer = float(self.get_parameter("vehicle.max_steer_rad").value)
 
-        self.angle_min = float(self.get_parameter("lidar.angle_min").value)
-        self.angle_max = float(self.get_parameter("lidar.angle_max").value)
         self.range_min = float(self.get_parameter("lidar.range_min").value)
         self.range_max = float(self.get_parameter("lidar.range_max").value)
         self.scan_topic = str(self.get_parameter("scan.topic").value)
@@ -65,17 +70,11 @@ class TinyLidarNetNode(Node):
         self.control_topic = str(self.get_parameter("control.topic").value)
 
         model_path = str(self.get_parameter("model.path").value)
-        model_device = str(self.get_parameter("model.device").value)
         if not model_path:
-            raise ValueError("model.path is empty. Set a PPO .zip model path before starting the node.")
+            raise ValueError("model.path is empty. Set a PPO policy .npz path before starting the node.")
 
-        self.model = PPO.load(model_path, device=model_device)
-        obs_shape = getattr(self.model.observation_space, "shape", None)
-        if not obs_shape or len(obs_shape) != 1:
-            raise ValueError(f"Unsupported PPO observation space: {self.model.observation_space}")
-        self.input_dim = int(obs_shape[0])
-        self.angle_increment = (self.angle_max - self.angle_min) / max(self.input_dim - 1, 1)
-
+        self.policy = NumpyPpoPolicy(model_path)
+        self.input_dim = self.policy.input_dim
         self.current_speed = 0.0
         self.inference_times: list[float] = []
         self.last_log_time = self.get_clock().now()
@@ -113,10 +112,9 @@ class TinyLidarNetNode(Node):
             idx = np.linspace(0, max(len(ranges) - 1, 0), self.input_dim, dtype=int)
             ranges = ranges[idx] if len(ranges) else np.full(self.input_dim, self.range_max, dtype=np.float32)
         obs = ranges / self.range_max
-        action, _ = self.model.predict(obs, deterministic=True)
-        action = np.asarray(action, dtype=np.float32).reshape(-1)
+        action = self.policy.predict(obs).reshape(-1)
         if action.size < 2:
-            self.get_logger().warn("PPO model returned fewer than 2 actions; skipping command publication.")
+            self.get_logger().warn("PPO policy returned fewer than 2 actions; skipping command publication.")
             return
 
         target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
@@ -157,12 +155,13 @@ def main(args=None):
     node = TinyLidarNetNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
