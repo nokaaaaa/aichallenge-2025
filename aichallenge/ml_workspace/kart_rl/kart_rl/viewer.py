@@ -216,7 +216,6 @@ def main() -> None:
     bound_points.extend(lane_edges)
     all_points = np.vstack(bound_points)
     bounds = (all_points.min(axis=0) - 4.0, all_points.max(axis=0) + 4.0)
-    reference_line = world_to_screen(track, bounds, screen_size).astype(int)
     driven_line = world_to_screen(frames[:, 1:3], bounds, screen_size).astype(int)
 
     idx = 0
@@ -246,7 +245,6 @@ def main() -> None:
         for edge in lane_edges:
             pts = world_to_screen(edge, bounds, screen_size).astype(int)
             pygame.draw.lines(screen, (116, 120, 114), True, pts, width=1)
-        pygame.draw.lines(screen, (34, 92, 132), True, reference_line, width=2)
         if idx > 1:
             pygame.draw.lines(screen, (198, 58, 42), False, driven_line[: idx + 1], width=2)
 
