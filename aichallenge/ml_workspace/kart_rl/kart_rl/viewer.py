@@ -18,7 +18,7 @@ def world_to_screen(points, bounds, screen_size, margin=48):
     return screen
 
 
-def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size):
+def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size, collision=False):
     center = world_to_screen(np.array([xy], dtype=np.float32), bounds, screen_size)[0]
     min_xy, max_xy = bounds
     scale = min((screen_size[0] - 96) / max(max_xy[0] - min_xy[0], 1.0), (screen_size[1] - 96) / max(max_xy[1] - min_xy[1], 1.0))
@@ -29,7 +29,23 @@ def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size):
     rot = np.array([[c, -s], [s, c]])
     pts = corners @ rot.T + center
     pygame.draw.polygon(surface, (238, 183, 58), pts)
-    pygame.draw.polygon(surface, (77, 65, 32), pts, width=2)
+    outline = (196, 36, 32) if collision else (77, 65, 32)
+    pygame.draw.polygon(surface, outline, pts, width=3 if collision else 2)
+
+
+def termination_reason(frame, frames, config):
+    if bool(frame[9]):
+        return "collision"
+    if bool(frame[12]):
+        return "stopped"
+    if frame[7] >= 0.999:
+        return "lap complete"
+    timeout_time = float(config["env"]["max_episode_steps"]) * float(config["env"]["dt"])
+    if abs(float(frame[0]) - timeout_time) <= float(config["env"]["dt"]) * 1.5:
+        return "timeout"
+    if len(frames) > 0:
+        return "log end"
+    return "unknown"
 
 
 def draw_lidar(surface, frame, ranges, angles, range_max, sample_ratio, vehicle_length, bounds, screen_size):
@@ -255,12 +271,17 @@ def main() -> None:
                 bounds,
                 screen_size,
             )
-        draw_vehicle(screen, frame[1:3], float(frame[3]), vehicle_length, vehicle_width, bounds, screen_size)
+        draw_vehicle(screen, frame[1:3], float(frame[3]), vehicle_length, vehicle_width, bounds, screen_size, collision=bool(frame[9]))
         text = f"t={frame[0]:6.2f}s  v={frame[4]:4.2f}m/s  progress={frame[7] * 100:5.1f}%  lateral={frame[8]:+.2f}m"
         screen.blit(font.render(text, True, (25, 29, 33)), (18, 16))
         screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar", True, (72, 76, 80)), (18, 42))
+        if bool(frame[9]):
+            screen.blit(font.render("collision", True, (170, 40, 40)), (18, 68))
         if idx == len(frames) - 1:
-            screen.blit(font.render("rollout end", True, (170, 40, 40)), (18, 68))
+            screen.blit(
+                font.render(f"rollout end: {termination_reason(frame, frames, config)}", True, (170, 40, 40)),
+                (18, 94 if bool(frame[9]) else 68),
+            )
 
         pygame.display.flip()
         clock.tick(fps)

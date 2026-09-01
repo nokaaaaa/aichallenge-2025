@@ -140,20 +140,9 @@ class RacingKartEnv(gym.Env):
         self.lap_count = max(0, int(self.progress_s / self.track.length))
         self.stopped_steps = self.stopped_steps + 1 if self.state.speed < self.min_moving_speed else 0
 
-        margin = self.boundary_margin
-        collision = proj.lateral_error < proj.lateral_min + margin or proj.lateral_error > proj.lateral_max - margin
+        collision = self._is_collision(proj)
         if collision:
-            clamped_lateral = float(np.clip(proj.lateral_error, proj.lateral_min + margin, proj.lateral_max - margin))
-            normal = np.array([-np.sin(proj.yaw), np.cos(proj.yaw)])
-            self.state.x = float(proj.x + normal[0] * clamped_lateral)
-            self.state.y = float(proj.y + normal[1] * clamped_lateral)
-            proj = self.track.project_near(
-                self.state.x,
-                self.state.y,
-                self.state.yaw,
-                near_s=proj.s,
-                window_m=self.projection_window_m,
-            )
+            proj = self._resolve_collision(proj)
         lap_finished = self.lap_count >= self.finish_laps
         stopped = self.stopped_steps >= self.max_stopped_steps
         terminated = bool(collision or lap_finished or stopped)
@@ -164,6 +153,24 @@ class RacingKartEnv(gym.Env):
         self.prev_x = self.state.x
         self.prev_y = self.state.y
         return self._obs(proj), reward, terminated, truncated, self._info(proj, collision=collision)
+
+    def _is_collision(self, proj) -> bool:
+        margin = self.boundary_margin
+        return proj.lateral_error < proj.lateral_min + margin or proj.lateral_error > proj.lateral_max - margin
+
+    def _resolve_collision(self, proj):
+        margin = self.boundary_margin
+        clamped_lateral = float(np.clip(proj.lateral_error, proj.lateral_min + margin, proj.lateral_max - margin))
+        normal = np.array([-np.sin(proj.yaw), np.cos(proj.yaw)])
+        self.state.x = float(proj.x + normal[0] * clamped_lateral)
+        self.state.y = float(proj.y + normal[1] * clamped_lateral)
+        return self.track.project_near(
+            self.state.x,
+            self.state.y,
+            self.state.yaw,
+            near_s=proj.s,
+            window_m=self.projection_window_m,
+        )
 
     def _apply_action(self, action: np.ndarray) -> None:
         target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
