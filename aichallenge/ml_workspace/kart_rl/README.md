@@ -11,7 +11,6 @@ kart_rl/
 ├─ pyproject.toml
 ├─ configs/default.yaml
 ├─ configs/state.yaml
-├─ configs/lidar.yaml
 ├─ configs/lane.csv
 ├─ kart_rl/
 │  ├─ env.py       # Gymnasium環境
@@ -89,7 +88,7 @@ uv run kart-rl-viewer --config configs/state.yaml
 - レーン表示: `aichallenge/ml_workspace/kart_rl/configs/lane.csv`
 - 車両ホイールベース: `1.087 m`
 - 車幅: `1.45 m`
-- 最大速度: `8.33 m/s`
+- 最大速度: `4.165 m/s`
 - 最大加速度: `3.2 m/s^2`
 - 最大ブレーキ: `5.0 m/s^2`
 

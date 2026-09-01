@@ -53,7 +53,7 @@ vehicle:
   wheelbase_m: 1.087
   width_m: 1.45
   length_m: 1.8
-  max_speed_mps: 8.33
+  max_speed_mps: 4.165
   max_accel_mps2: 3.2
   max_brake_mps2: 5.0
   max_steer_rad: 0.75
