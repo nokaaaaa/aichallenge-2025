@@ -1,15 +1,34 @@
 /**:
   ros__parameters:
-    log_interval_sec: 5.0        # 推論統計ログを出す間隔（秒）
-    
-    model:
-      input_dim: 750            # LiDARスキャンの入力次元
-      output_dim: 2              # 出力（steering, throttleなど）
-      architecture: "normal"      # "normal" または "small"
-      ckpt_path: "/path/to/tinylidarnet_weights.npy"
+    log_interval_sec: 5.0
 
-    max_range: 30.0              # LiDARの最大レンジ（メートル）
-    control_mode: "fixed"          # "ai" または "fixed"
-    acceleration: 0.6            # 固定加速度コマンド mode:fixed の場合に使用
+    model:
+      path: ""
+      device: "cpu"
+
+    lidar:
+      angle_min: -1.5666074752807617
+      angle_max: 1.5707963705062866
+      range_min: 0.0
+      range_max: 25.0
+
+    pointcloud:
+      topic: "/sensing/lidar/pointcloud"
+      z_min: -1.0
+      z_max: 1.0
+
+    odometry:
+      topic: "/localization/kinematic_state"
+
+    control:
+      topic: "/control/command/control_cmd"
+      dt: 0.05
+
+    vehicle:
+      min_speed_mps: 0.0
+      max_speed_mps: 4.165
+      max_accel_mps2: 3.2
+      max_brake_mps2: 5.0
+      max_steer_rad: 0.75
 
     debug: false

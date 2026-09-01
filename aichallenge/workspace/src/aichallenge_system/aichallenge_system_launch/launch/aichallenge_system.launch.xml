@@ -8,6 +8,7 @@
     <arg name="capture" default="false"/>
     <arg name="rosbag" default="false"/>
     <arg name="domain_id" default="0"/>
+    <arg name="control_method" default="mpc"/>
 
     <let name="domain_id" value="$(var domain_id)"/>
     <let name="rviz_config" value="$(find-pkg-share aichallenge_system_launch)/config/autoware_vehicle.rviz"/>
@@ -30,6 +31,7 @@
         <arg name="use_sim_time" value="$(var use_sim_time)"/>
         <arg name="sensor_model" value="$(var sensor_model)"/>
         <arg name="launch_vehicle_interface" value="$(var launch_vehicle_interface)"/>
+        <arg name="control_method" value="$(var control_method)"/>
     </include>
 
     <!-- Visualization. -->

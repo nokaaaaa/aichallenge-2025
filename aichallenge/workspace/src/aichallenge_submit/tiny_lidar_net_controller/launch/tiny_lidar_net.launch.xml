@@ -3,20 +3,22 @@
   <arg name="tiny_lidar_net_node_param"  default="$(find-pkg-share tiny_lidar_net_controller)/config/tiny_lidar_net_node.param.yaml"/>
   <arg name="use_sim_time" default="true"/>
   <arg name="scan_topic" default="/sensing/lidar/scan"/>
+  <arg name="odometry_topic" default="/localization/kinematic_state"/>
   <arg name="control_cmd_topic" default="/control/command/control_cmd"/>
-  <arg name="ckpt_path" default="$(find-pkg-share tiny_lidar_net_controller)/ckpt/tinylidarnet_weights.npy"/>
+  <arg name="model_path" default="$(find-pkg-share tiny_lidar_net_controller)/ckpt/ppo_kart_lidar.zip"/>
 
-  <!-- tiny_lidar_net_node -->
+  <!-- PPO pointcloud controller -->
   <node pkg="tiny_lidar_net_controller" 
         exec="tiny_lidar_net_controller_node.py"
         name="tiny_lidar_net_controller_node"
         output="screen">
 
     <param from="$(var tiny_lidar_net_node_param)"/>
-    <param name="model.ckpt_path" value="$(var ckpt_path)"/>
+    <param name="model.path" value="$(var model_path)"/>
     <param name="use_sim_time" value="$(var use_sim_time)"/>
-    <remap from="/scan" to="$(var scan_topic)"/>
-    <remap from="/control/command/control_cmd" to="$(var control_cmd_topic)"/>
+    <param name="scan.topic" value="$(var scan_topic)"/>
+    <param name="odometry.topic" value="$(var odometry_topic)"/>
+    <param name="control.topic" value="$(var control_cmd_topic)"/>
   </node>
 
 
