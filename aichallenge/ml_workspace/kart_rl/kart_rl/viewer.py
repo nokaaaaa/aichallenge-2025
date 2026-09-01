@@ -44,6 +44,8 @@ def main() -> None:
     data = np.load(rollout_path)
     frames = data["frames"]
     track = data["track"]
+    left_boundary = data["left_boundary"] if "left_boundary" in data else np.empty((0, 2), dtype=np.float32)
+    right_boundary = data["right_boundary"] if "right_boundary" in data else np.empty((0, 2), dtype=np.float32)
     half_width = float(data["half_width"])
     vehicle_length = float(data["vehicle_length"])
     vehicle_width = float(data["vehicle_width"])
@@ -58,14 +60,18 @@ def main() -> None:
     bounds = (track.min(axis=0) - half_width - 4.0, track.max(axis=0) + half_width + 4.0)
     center_line = world_to_screen(track, bounds, screen_size).astype(int)
     left_right = []
-    closed = np.vstack([track, track[0]])
-    dirs = np.diff(closed, axis=0)
-    yaws = np.arctan2(dirs[:, 1], dirs[:, 0])
-    normals = np.column_stack([-np.sin(yaws), np.cos(yaws)])
-    left = track + normals * half_width
-    right = track - normals * half_width
-    left_right.append(world_to_screen(left, bounds, screen_size).astype(int))
-    left_right.append(world_to_screen(right, bounds, screen_size).astype(int))
+    if len(left_boundary) and len(right_boundary):
+        left_right.append(world_to_screen(left_boundary, bounds, screen_size).astype(int))
+        left_right.append(world_to_screen(right_boundary, bounds, screen_size).astype(int))
+    else:
+        closed = np.vstack([track, track[0]])
+        dirs = np.diff(closed, axis=0)
+        yaws = np.arctan2(dirs[:, 1], dirs[:, 0])
+        normals = np.column_stack([-np.sin(yaws), np.cos(yaws)])
+        left = track + normals * half_width
+        right = track - normals * half_width
+        left_right.append(world_to_screen(left, bounds, screen_size).astype(int))
+        left_right.append(world_to_screen(right, bounds, screen_size).astype(int))
 
     idx = 0
     paused = False

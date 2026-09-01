@@ -22,10 +22,19 @@ def wrap_angle(angle: np.ndarray | float) -> np.ndarray | float:
 
 
 class Track:
-    def __init__(self, points: np.ndarray, half_width_m: float, curvature_scale: float = 12.0):
+    def __init__(
+        self,
+        points: np.ndarray,
+        half_width_m: float,
+        curvature_scale: float = 12.0,
+        left_boundary: np.ndarray | None = None,
+        right_boundary: np.ndarray | None = None,
+    ):
         if len(points) < 3:
             raise ValueError("Track requires at least 3 points")
         self.points = points.astype(np.float64)
+        self.left_boundary = left_boundary.astype(np.float64) if left_boundary is not None else None
+        self.right_boundary = right_boundary.astype(np.float64) if right_boundary is not None else None
         self.half_width_m = float(half_width_m)
         self.curvature_scale = float(curvature_scale)
 
@@ -53,18 +62,28 @@ class Track:
         data = np.genfromtxt(path, delimiter=",")
         if data.ndim != 2 or data.shape[1] < 4:
             raise ValueError("lane CSV must have at least 4 columns: left_x,left_y,right_x,right_y")
-        left = data[:, 0:2]
-        right = data[:, 2:4]
+        left = _clean_polyline(data[:, 0:2])
+        right = _clean_polyline(data[:, 2:4])
+        sample_count = max(len(left), len(right))
+        left = _resample_closed_polyline(left, sample_count)
+        right = _resample_closed_polyline(right, sample_count)
         widths = np.linalg.norm(right - left, axis=1)
         center = 0.5 * (left + right)
-        center = center - center[0]
+        origin = center[0].copy()
+        center = center - origin
         if isinstance(half_width_m, str):
             if half_width_m != "auto":
                 raise ValueError("track.half_width_m must be a number or 'auto'")
             half_width = float(np.nanmedian(widths) * 0.5)
         else:
             half_width = float(half_width_m)
-        return cls(points=center, half_width_m=half_width, curvature_scale=curvature_scale)
+        return cls(
+            points=center,
+            half_width_m=half_width,
+            curvature_scale=curvature_scale,
+            left_boundary=left - origin,
+            right_boundary=right - origin,
+        )
 
     def _compute_curvatures(self) -> np.ndarray:
         yaw_delta = wrap_angle(np.roll(self.seg_yaws, -1) - self.seg_yaws)
@@ -103,3 +122,28 @@ class Track:
 
     def lookahead_curvatures(self, s: float, distances: tuple[float, ...]) -> np.ndarray:
         return np.array([self.sample_at(s + d)[3] * self.curvature_scale for d in distances], dtype=np.float32)
+
+
+def _clean_polyline(points: np.ndarray) -> np.ndarray:
+    points = points[np.isfinite(points).all(axis=1)]
+    if len(points) < 3:
+        raise ValueError("lane boundary must contain at least 3 finite points")
+    step = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    keep = np.concatenate([[True], step > 1e-6])
+    return points[keep]
+
+
+def _resample_closed_polyline(points: np.ndarray, sample_count: int) -> np.ndarray:
+    closed = np.vstack([points, points[0]])
+    seg = np.diff(closed, axis=0)
+    seg_len = np.linalg.norm(seg, axis=1)
+    keep = seg_len > 1e-6
+    starts = closed[:-1][keep]
+    vecs = seg[keep]
+    lens = seg_len[keep]
+    cumulative = np.concatenate([[0.0], np.cumsum(lens)])
+    total = cumulative[-1]
+    samples = np.linspace(0.0, total, sample_count, endpoint=False)
+    indices = np.searchsorted(cumulative[1:], samples, side="right")
+    ratio = (samples - cumulative[indices]) / lens[indices]
+    return starts[indices] + vecs[indices] * ratio[:, None]

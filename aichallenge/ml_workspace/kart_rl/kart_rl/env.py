@@ -73,7 +73,7 @@ class RacingKartEnv(gym.Env):
         self.observation_space = spaces.Box(low=-np.ones(8, dtype=np.float32), high=np.ones(8, dtype=np.float32))
         self.state = VehicleState(0.0, 0.0, 0.0, 0.0, 0.0)
         self.steps = 0
-        self.unwrapped_s = 0.0
+        self.progress_s = 0.0
         self.prev_s = 0.0
         self.prev_action = np.zeros(2, dtype=np.float32)
         self.lap_count = 0
@@ -89,7 +89,7 @@ class RacingKartEnv(gym.Env):
         self.state = VehicleState(x=x, y=y, yaw=yaw, speed=1.0, steer=0.0)
         proj = self.track.project(x, y, yaw)
         self.steps = 0
-        self.unwrapped_s = proj.s
+        self.progress_s = 0.0
         self.prev_s = proj.s
         self.prev_action = np.zeros(2, dtype=np.float32)
         self.lap_count = 0
@@ -112,10 +112,10 @@ class RacingKartEnv(gym.Env):
         elif raw_delta > 0.5 * self.track.length:
             raw_delta -= self.track.length
         progress = max(raw_delta, -0.5)
-        self.unwrapped_s += raw_delta
+        self.progress_s += max(raw_delta, 0.0)
         self.prev_s = proj.s
         self.steps += 1
-        self.lap_count = max(0, int(self.unwrapped_s / self.track.length))
+        self.lap_count = max(0, int(self.progress_s / self.track.length))
 
         collision = abs(proj.lateral_error) > self.wall_limit
         lap_finished = self.lap_count >= self.finish_laps
@@ -163,8 +163,8 @@ class RacingKartEnv(gym.Env):
             "yaw": self.state.yaw,
             "speed": self.state.speed,
             "steer": self.state.steer,
-            "s": self.unwrapped_s,
-            "lap_progress": (self.unwrapped_s % self.track.length) / self.track.length,
+            "s": self.progress_s,
+            "lap_progress": (self.progress_s % self.track.length) / self.track.length,
             "lap_count": self.lap_count,
             "lateral_error": proj.lateral_error,
             "heading_error": proj.heading_error,
