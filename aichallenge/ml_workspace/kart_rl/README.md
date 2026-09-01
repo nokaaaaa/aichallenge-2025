@@ -69,6 +69,8 @@ uv run kart-rl-viewer
 - `left/right`: 1秒単位でシーク
 - `r`: 最初から再生
 
+赤線はモデルが実際に走った軌跡です。青線はレーン境界から作った中心線、灰色線は `configs/lane.csv` の左右境界です。
+
 ## 固定設定
 
 - レーン情報: `aichallenge/ml_workspace/kart_rl/configs/lane.csv`

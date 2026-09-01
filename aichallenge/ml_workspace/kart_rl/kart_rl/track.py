@@ -13,6 +13,8 @@ class Projection:
     y: float
     yaw: float
     lateral_error: float
+    lateral_min: float
+    lateral_max: float
     heading_error: float
     curvature: float
 
@@ -42,6 +44,10 @@ class Track:
         self.seg_lengths = np.linalg.norm(self.seg_vecs, axis=1)
         keep = self.seg_lengths > 1e-6
         self.points = self.points[keep]
+        if self.left_boundary is not None:
+            self.left_boundary = self.left_boundary[keep]
+        if self.right_boundary is not None:
+            self.right_boundary = self.right_boundary[keep]
         self.seg_vecs = np.roll(self.points, -1, axis=0) - self.points
         self.seg_lengths = np.linalg.norm(self.seg_vecs, axis=1)
         self.seg_dirs = self.seg_vecs / self.seg_lengths[:, None]
@@ -117,6 +123,7 @@ class Track:
         seg_dir = self.seg_dirs[idx]
         delta = p - center
         lateral = float(seg_dir[0] * delta[1] - seg_dir[1] * delta[0])
+        lateral_min, lateral_max = self._local_lateral_bounds(idx, float(t[local_idx]), center, seg_dir)
         track_yaw = float(self.seg_yaws[idx])
         return Projection(
             s=float((self.s_starts[idx] + t[local_idx] * self.seg_lengths[idx]) % self.length),
@@ -124,9 +131,28 @@ class Track:
             y=float(center[1]),
             yaw=track_yaw,
             lateral_error=lateral,
+            lateral_min=lateral_min,
+            lateral_max=lateral_max,
             heading_error=float(wrap_angle(yaw - track_yaw)),
             curvature=float(self.curvatures[idx]),
         )
+
+    def _local_lateral_bounds(
+        self,
+        idx: int,
+        ratio: float,
+        center: np.ndarray,
+        seg_dir: np.ndarray,
+    ) -> tuple[float, float]:
+        if self.left_boundary is None or self.right_boundary is None:
+            return -self.half_width_m, self.half_width_m
+
+        next_idx = (idx + 1) % len(self.points)
+        left = self.left_boundary[idx] + (self.left_boundary[next_idx] - self.left_boundary[idx]) * ratio
+        right = self.right_boundary[idx] + (self.right_boundary[next_idx] - self.right_boundary[idx]) * ratio
+        normal = np.array([-seg_dir[1], seg_dir[0]])
+        signed = [float(np.dot(left - center, normal)), float(np.dot(right - center, normal))]
+        return min(signed), max(signed)
 
     def sample_at(self, s: float) -> tuple[float, float, float, float]:
         s = s % self.length

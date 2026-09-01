@@ -52,6 +52,9 @@ def main() -> None:
                 info["lap_progress"],
                 info["lateral_error"],
                 float(info["collision"]),
+                info["lateral_min"],
+                info["lateral_max"],
+                float(info["stopped"]),
             ]
         )
 

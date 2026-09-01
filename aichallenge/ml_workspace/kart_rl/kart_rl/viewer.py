@@ -57,7 +57,11 @@ def main() -> None:
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("monospace", 18)
 
-    bounds = (track.min(axis=0) - half_width - 4.0, track.max(axis=0) + half_width + 4.0)
+    bound_points = [track, frames[:, 1:3]]
+    if len(left_boundary) and len(right_boundary):
+        bound_points.extend([left_boundary, right_boundary])
+    all_points = np.vstack(bound_points)
+    bounds = (all_points.min(axis=0) - 4.0, all_points.max(axis=0) + 4.0)
     center_line = world_to_screen(track, bounds, screen_size).astype(int)
     driven_line = world_to_screen(frames[:, 1:3], bounds, screen_size).astype(int)
     left_right = []
