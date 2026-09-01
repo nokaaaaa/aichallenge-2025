@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +62,23 @@ def export_ppo_policy_npz(model: PPO, model_path: Path) -> Path:
     return policy_path
 
 
+def make_run_model_path(base_model_path: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = base_model_path.parent / f"{base_model_path.name}_{timestamp}"
+    suffix = 1
+    while run_dir.exists():
+        run_dir = base_model_path.parent / f"{base_model_path.name}_{timestamp}_{suffix}"
+        suffix += 1
+    run_dir.mkdir(parents=True)
+    return run_dir / base_model_path.name
+
+
+def update_latest_symlink(target: Path, link_path: Path) -> None:
+    if link_path.exists() or link_path.is_symlink():
+        link_path.unlink()
+    link_path.symlink_to(os.path.relpath(target, link_path.parent))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
@@ -83,12 +103,17 @@ def main() -> None:
     timesteps = int(args.timesteps or train_cfg["total_timesteps"])
     model.learn(total_timesteps=timesteps, progress_bar=True)
 
-    model_path = resolve_path(train_cfg["model_path"], config)
-    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+    base_model_path = resolve_path(train_cfg["model_path"], config)
+    model_path = make_run_model_path(base_model_path)
     model.save(str(model_path))
+    config_out = model_path.parent / "config.yaml"
+    shutil.copy2(config["_config_path"], config_out)
     if train_cfg.get("algorithm", "ppo").lower() == "ppo":
         policy_path = export_ppo_policy_npz(model, Path(model_path))
+        update_latest_symlink(policy_path, base_model_path.with_name(f"{base_model_path.name}_latest_policy.npz"))
         print(f"Saved policy: {policy_path}")
+    update_latest_symlink(model_path.with_suffix(".zip"), base_model_path.with_name(f"{base_model_path.name}_latest.zip"))
+    print(f"Saved config: {config_out}")
     env.close()
     print(f"Saved model: {model_path}.zip")
 

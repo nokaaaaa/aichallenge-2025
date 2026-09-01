@@ -55,7 +55,16 @@ uv run kart-rl-train --timesteps 5000
 uv run kart-rl-train --config configs/state.yaml --timesteps 5000
 ```
 
-デフォルトでは `models/ppo_kart_lidar.zip` に保存されます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
+デフォルトでは学習ごとに `models/ppo_kart_lidar_<timestamp>/` を作り、モデル、ROS実行用policy、使用した設定ファイルを保存します。
+
+```text
+models/ppo_kart_lidar_<timestamp>/
+├─ ppo_kart_lidar.zip
+├─ ppo_kart_lidar_policy.npz
+└─ config.yaml
+```
+
+`models/ppo_kart_lidar_latest.zip` と `models/ppo_kart_lidar_latest_policy.npz` は最新モデルへの symlink です。`lidar_rl` の ROS 実行は `ppo_kart_lidar_latest_policy.npz` を読みます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
 
 ## TensorBoard
 
