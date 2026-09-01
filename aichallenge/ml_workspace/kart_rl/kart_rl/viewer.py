@@ -48,7 +48,7 @@ def termination_reason(frame, frames, config):
     return "unknown"
 
 
-def draw_lidar(surface, frame, ranges, angles, range_max, sample_ratio, vehicle_length, bounds, screen_size):
+def draw_lidar(surface, frame, ranges, angles, range_max, vehicle_length, bounds, screen_size):
     if ranges is None or angles is None or len(ranges) == 0:
         return
 
@@ -60,10 +60,8 @@ def draw_lidar(surface, frame, ranges, angles, range_max, sample_ratio, vehicle_
         ],
         dtype=np.float32,
     )
-    sample_ratio = float(np.clip(sample_ratio, 0.001, 1.0))
-    stride = max(1, int(round(1.0 / sample_ratio)))
-    ray_ranges = np.asarray(ranges[::stride], dtype=np.float32)
-    ray_angles = yaw + np.asarray(angles[::stride], dtype=np.float32)
+    ray_ranges = np.asarray(ranges, dtype=np.float32)
+    ray_angles = yaw + np.asarray(angles, dtype=np.float32)
     endpoints = origin + np.column_stack([np.cos(ray_angles), np.sin(ray_angles)]) * ray_ranges[:, None]
 
     origin_screen = world_to_screen(np.array([origin], dtype=np.float32), bounds, screen_size)[0].astype(int)
@@ -123,7 +121,9 @@ def lidar_angles_from_config(config: dict) -> np.ndarray | None:
     angle_min = float(lidar_cfg["angle_min"])
     angle_max = float(lidar_cfg["angle_max"])
     angle_increment = float(lidar_cfg["angle_increment"])
-    return np.arange(angle_min, angle_max + 0.5 * angle_increment, angle_increment, dtype=np.float32)
+    sample_ratio = float(lidar_cfg.get("sample_ratio", 1.0))
+    stride = max(1, int(round(1.0 / max(sample_ratio, 1e-3))))
+    return np.arange(angle_min, angle_max + 0.5 * angle_increment, angle_increment, dtype=np.float32)[::stride]
 
 
 def scan_lidar_for_frame(
@@ -200,7 +200,6 @@ def main() -> None:
     lidar_ranges = data["lidar_ranges"] if "lidar_ranges" in data else None
     lidar_angles = data["lidar_angles"] if "lidar_angles" in data else lidar_angles_from_config(config)
     lidar_range_max = float(data["lidar_range_max"]) if "lidar_range_max" in data else float(config.get("lidar", {}).get("range_max", 25.0))
-    lidar_sample_ratio = float(config.get("viewer", {}).get("lidar_sample_ratio", 0.5))
     show_lidar = lidar_angles is not None
     computed_lidar_cache: dict[int, np.ndarray] = {}
 
@@ -266,7 +265,6 @@ def main() -> None:
                 current_lidar,
                 lidar_angles,
                 lidar_range_max,
-                lidar_sample_ratio,
                 vehicle_length,
                 bounds,
                 screen_size,

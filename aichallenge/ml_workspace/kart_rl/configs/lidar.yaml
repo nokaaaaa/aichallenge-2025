@@ -15,6 +15,7 @@ lidar:
   scan_time: 0.05000000074505806
   range_min: 0.0
   range_max: 25.0
+  sample_ratio: 0.5
   ray_chunk_size: 64
 
 vehicle:
@@ -73,4 +74,3 @@ viewer:
   model_path: "models/ppo_kart_lidar.zip"
   rollout_path: "rollouts/latest_lidar.npz"
   fps: 50
-  lidar_sample_ratio: 0.5

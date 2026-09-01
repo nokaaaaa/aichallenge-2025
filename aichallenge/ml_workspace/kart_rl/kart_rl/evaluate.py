@@ -64,9 +64,15 @@ def main() -> None:
     save_data = {}
     if lidar_scans:
         lidar_cfg = config["lidar"]
+        sample_ratio = float(lidar_cfg.get("sample_ratio", 1.0))
+        angle_min = float(lidar_cfg["angle_min"])
+        angle_max = float(lidar_cfg["angle_max"])
+        angle_increment = float(lidar_cfg["angle_increment"])
+        full_angles = np.arange(angle_min, angle_max + 0.5 * angle_increment, angle_increment, dtype=np.float32)
+        sample_stride = max(1, int(round(1.0 / max(sample_ratio, 1e-3))))
         save_data.update(
             lidar_ranges=np.asarray(lidar_scans, dtype=np.float32) * float(lidar_cfg["range_max"]),
-            lidar_angles=env.angles.astype(np.float32),
+            lidar_angles=full_angles[::sample_stride],
             lidar_range_max=np.float32(lidar_cfg["range_max"]),
         )
     np.savez_compressed(

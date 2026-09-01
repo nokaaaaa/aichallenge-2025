@@ -85,7 +85,7 @@ lidar:
   range_max: 25.0
 ```
 
-ビーム数は750本です。観測空間は `Box(0, 1, shape=(750,), dtype=float32)` で、各値は `range / range_max` です。交点がない場合は `range_max` になります。
+ビーム数はデフォルトで750本です。観測空間は `Box(0, 1, shape=(750,), dtype=float32)` で、各値は `range / range_max` です。交点がない場合は `range_max` になります。`lidar.sample_ratio` を変えると入力側のビーム数も変わります。
 
 ## 状態観測版
 
@@ -362,7 +362,7 @@ uv run kart-rl-viewer
 - 青緑の放射線: 車両先頭LiDARの現在スキャン
 - 黄色い矩形: 車両
 
-LiDAR表示は `viewer.lidar_sample_ratio` で間引き率を指定します。デフォルトは `0.5` で、750本のビームを1本おきに表示します。この設定はviewer表示だけに使い、学習入力のLiDAR観測は750本のままです。
+LiDARは入力側で間引いており、間引き率は `lidar.sample_ratio` で指定します。デフォルトは `0.5` です。viewer は評価ロールアウトに保存されたサンプル済みLiDARをそのまま表示します。
 
 操作:
 
