@@ -57,6 +57,23 @@ uv run kart-rl-train --config configs/state.yaml --timesteps 5000
 
 デフォルトでは `models/ppo_kart_lidar.zip` に保存されます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
 
+## TensorBoard
+
+LiDAR PPO の学習ログを確認します。
+
+```bash
+cd aichallenge/ml_workspace/kart_rl
+uv run tensorboard --logdir runs/tensorboard_lidar --host 0.0.0.0 --port 6006
+```
+
+起動後、ブラウザで `http://localhost:6006` を開きます。
+
+状態量版のログを見る場合:
+
+```bash
+uv run tensorboard --logdir runs/tensorboard --host 0.0.0.0 --port 6006
+```
+
 ## 評価とビューア
 
 学習済みモデルからビューア用ログを生成します。
