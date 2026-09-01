@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import math
-from pathlib import Path
 
 import numpy as np
 import pygame
@@ -33,6 +32,44 @@ def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size):
     pygame.draw.polygon(surface, (77, 65, 32), pts, width=2)
 
 
+def lane_edge_polylines(lane_segments: np.ndarray) -> list[np.ndarray]:
+    if len(lane_segments) == 0:
+        return []
+    edges = [lane_segments[:, 0, :], lane_segments[:, 1, :]]
+    polylines = []
+    for edge in edges:
+        finite = edge[np.isfinite(edge).all(axis=1)]
+        if len(finite) < 2:
+            continue
+        step = np.linalg.norm(np.diff(finite, axis=0), axis=1)
+        keep = np.concatenate([[True], step > 1e-6])
+        polylines.append(finite[keep])
+    return polylines
+
+
+def lane_edge_polylines_from_config(config: dict) -> list[np.ndarray]:
+    track_cfg = config.get("track", {})
+    lane_csv_path = track_cfg.get("lane_csv_path")
+    track_csv_path = track_cfg.get("csv_path")
+    if not lane_csv_path or not track_csv_path:
+        return []
+
+    track_data = np.genfromtxt(resolve_path(track_csv_path, config, must_exist=True), delimiter=",", names=True)
+    origin = np.array([track_data["x"][0], track_data["y"][0]], dtype=np.float64)
+    lane_data = np.genfromtxt(resolve_path(lane_csv_path, config, must_exist=True), delimiter=",")
+
+    polylines = []
+    for cols in ((0, 1), (2, 3)):
+        points = lane_data[:, cols]
+        points = points[np.isfinite(points).all(axis=1)] - origin
+        if len(points) < 2:
+            continue
+        step = np.linalg.norm(np.diff(points, axis=0), axis=1)
+        keep = np.concatenate([[True], step > 1e-6])
+        polylines.append(points[keep])
+    return polylines
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
@@ -47,7 +84,7 @@ def main() -> None:
     left_boundary = data["left_boundary"] if "left_boundary" in data else np.empty((0, 2), dtype=np.float32)
     right_boundary = data["right_boundary"] if "right_boundary" in data else np.empty((0, 2), dtype=np.float32)
     lane_segments = data["lane_segments"] if "lane_segments" in data else np.empty((0, 2, 2), dtype=np.float32)
-    half_width = float(data["half_width"])
+    lane_edges = lane_edge_polylines_from_config(config) or lane_edge_polylines(lane_segments)
     vehicle_length = float(data["vehicle_length"])
     vehicle_width = float(data["vehicle_width"])
 
@@ -61,25 +98,10 @@ def main() -> None:
     bound_points = [track, frames[:, 1:3]]
     if len(left_boundary) and len(right_boundary):
         bound_points.extend([left_boundary, right_boundary])
-    if len(lane_segments):
-        bound_points.append(lane_segments.reshape(-1, 2))
+    bound_points.extend(lane_edges)
     all_points = np.vstack(bound_points)
     bounds = (all_points.min(axis=0) - 4.0, all_points.max(axis=0) + 4.0)
-    center_line = world_to_screen(track, bounds, screen_size).astype(int)
     driven_line = world_to_screen(frames[:, 1:3], bounds, screen_size).astype(int)
-    left_right = []
-    if len(left_boundary) and len(right_boundary):
-        left_right.append(world_to_screen(left_boundary, bounds, screen_size).astype(int))
-        left_right.append(world_to_screen(right_boundary, bounds, screen_size).astype(int))
-    else:
-        closed = np.vstack([track, track[0]])
-        dirs = np.diff(closed, axis=0)
-        yaws = np.arctan2(dirs[:, 1], dirs[:, 0])
-        normals = np.column_stack([-np.sin(yaws), np.cos(yaws)])
-        left = track + normals * half_width
-        right = track - normals * half_width
-        left_right.append(world_to_screen(left, bounds, screen_size).astype(int))
-        left_right.append(world_to_screen(right, bounds, screen_size).astype(int))
 
     idx = 0
     paused = False
@@ -103,12 +125,9 @@ def main() -> None:
             idx = min(idx + 1, len(frames) - 1)
 
         screen.fill((236, 238, 232))
-        for border in left_right:
-            pygame.draw.lines(screen, (84, 88, 82), True, border, width=2)
-        for segment in lane_segments:
-            pts = world_to_screen(segment, bounds, screen_size).astype(int)
-            pygame.draw.line(screen, (116, 120, 114), pts[0], pts[1], width=1)
-        pygame.draw.lines(screen, (34, 92, 132), True, center_line, width=3)
+        for edge in lane_edges:
+            pts = world_to_screen(edge, bounds, screen_size).astype(int)
+            pygame.draw.lines(screen, (116, 120, 114), True, pts, width=1)
         if idx > 1:
             pygame.draw.lines(screen, (198, 58, 42), False, driven_line[: idx + 1], width=2)
 

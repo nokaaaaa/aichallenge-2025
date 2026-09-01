@@ -69,7 +69,7 @@ uv run kart-rl-viewer
 - `left/right`: 1秒単位でシーク
 - `r`: 最初から再生
 
-赤線はモデルが実際に走った軌跡です。青線は1周の進捗軸に使うraceline、灰色線は `configs/lane.csv` のレーン線分です。
+赤線はモデルが実際に走った軌跡です。灰色線は `configs/lane.csv` から復元したレーン境界線です。
 
 ## 固定設定
 
