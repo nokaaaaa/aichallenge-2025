@@ -64,6 +64,7 @@ class RacingKartEnv(gym.Env):
         self.reward_cfg = config["reward"]
         self.wall_limit = self.track.half_width_m - 0.5 * self.vehicle_width
         self.lookahead = (2.0, 5.0, 10.0, 18.0)
+        self.projection_window_m = max(20.0, self.max_speed * self.dt * 10.0)
 
         self.action_space = spaces.Box(
             low=np.array([-1.0, -1.0], dtype=np.float32),
@@ -77,6 +78,8 @@ class RacingKartEnv(gym.Env):
         self.prev_s = 0.0
         self.prev_action = np.zeros(2, dtype=np.float32)
         self.lap_count = 0
+        self.prev_x = 0.0
+        self.prev_y = 0.0
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
@@ -93,6 +96,8 @@ class RacingKartEnv(gym.Env):
         self.prev_s = proj.s
         self.prev_action = np.zeros(2, dtype=np.float32)
         self.lap_count = 0
+        self.prev_x = self.state.x
+        self.prev_y = self.state.y
         return self._obs(proj), self._info(proj, collision=False)
 
     def step(self, action):
@@ -105,14 +110,21 @@ class RacingKartEnv(gym.Env):
         self.state.y += self.state.speed * np.sin(self.state.yaw) * self.dt
         self.state.yaw = float(wrap_angle(self.state.yaw + self.state.speed / self.wheelbase * np.tan(self.state.steer) * self.dt))
 
-        proj = self.track.project(self.state.x, self.state.y, self.state.yaw)
+        proj = self.track.project_near(
+            self.state.x,
+            self.state.y,
+            self.state.yaw,
+            near_s=self.prev_s,
+            window_m=self.projection_window_m,
+        )
         raw_delta = proj.s - self.prev_s
         if raw_delta < -0.5 * self.track.length:
             raw_delta += self.track.length
         elif raw_delta > 0.5 * self.track.length:
             raw_delta -= self.track.length
-        progress = max(raw_delta, -0.5)
-        self.progress_s += max(raw_delta, 0.0)
+        max_step_progress = max(self.state.speed * self.dt * 1.2, 1e-3)
+        progress = float(np.clip(raw_delta, -max_step_progress, max_step_progress))
+        self.progress_s += max(progress, 0.0)
         self.prev_s = proj.s
         self.steps += 1
         self.lap_count = max(0, int(self.progress_s / self.track.length))
@@ -121,8 +133,11 @@ class RacingKartEnv(gym.Env):
         lap_finished = self.lap_count >= self.finish_laps
         terminated = bool(collision or lap_finished)
         truncated = bool(self.steps >= self.max_episode_steps)
-        reward = self._reward(proj, progress, action, collision, lap_finished)
+        distance_moved = float(np.hypot(self.state.x - self.prev_x, self.state.y - self.prev_y))
+        reward = self._reward(proj, progress, action, collision, lap_finished, distance_moved)
         self.prev_action = action.copy()
+        self.prev_x = self.state.x
+        self.prev_y = self.state.y
         return self._obs(proj), reward, terminated, truncated, self._info(proj, collision=collision)
 
     def _obs(self, proj) -> np.ndarray:
@@ -142,10 +157,20 @@ class RacingKartEnv(gym.Env):
         )
         return np.clip(obs, -1.0, 1.0).astype(np.float32)
 
-    def _reward(self, proj, progress: float, action: np.ndarray, collision: bool, lap_finished: bool) -> float:
+    def _reward(
+        self,
+        proj,
+        progress: float,
+        action: np.ndarray,
+        collision: bool,
+        lap_finished: bool,
+        distance_moved: float,
+    ) -> float:
         r = self.reward_cfg
         reward = r["progress"] * progress
         reward += r["speed"] * self.state.speed
+        if distance_moved > 1e-6:
+            reward -= r.get("wasted_motion", 0.0) * max(distance_moved - max(progress, 0.0), 0.0)
         reward -= r["lateral_error"] * abs(proj.lateral_error / self.track.half_width_m)
         reward -= r["heading_error"] * abs(proj.heading_error / np.pi)
         reward -= r["steer"] * abs(self.state.steer / self.max_steer)

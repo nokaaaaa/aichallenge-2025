@@ -91,19 +91,35 @@ class Track:
         return yaw_delta / np.maximum(avg_len, 1e-6)
 
     def project(self, x: float, y: float, yaw: float) -> Projection:
+        return self._project_on_segments(x, y, yaw, np.arange(len(self.points)))
+
+    def project_near(self, x: float, y: float, yaw: float, near_s: float, window_m: float) -> Projection:
+        seg_centers = (self.s_starts + 0.5 * self.seg_lengths) % self.length
+        delta = np.abs((seg_centers - near_s + 0.5 * self.length) % self.length - 0.5 * self.length)
+        indices = np.flatnonzero(delta <= window_m)
+        if len(indices) == 0:
+            indices = np.arange(len(self.points))
+        return self._project_on_segments(x, y, yaw, indices)
+
+    def _project_on_segments(self, x: float, y: float, yaw: float, indices: np.ndarray) -> Projection:
         p = np.array([x, y], dtype=np.float64)
-        rel = p - self.points
-        t = np.clip(np.einsum("ij,ij->i", rel, self.seg_dirs) / self.seg_lengths, 0.0, 1.0)
-        closest = self.points + self.seg_vecs * t[:, None]
+        rel = p - self.points[indices]
+        t = np.clip(
+            np.einsum("ij,ij->i", rel, self.seg_dirs[indices]) / self.seg_lengths[indices],
+            0.0,
+            1.0,
+        )
+        closest = self.points[indices] + self.seg_vecs[indices] * t[:, None]
         dist2 = np.sum((p - closest) ** 2, axis=1)
-        idx = int(np.argmin(dist2))
-        center = closest[idx]
+        local_idx = int(np.argmin(dist2))
+        idx = int(indices[local_idx])
+        center = closest[local_idx]
         seg_dir = self.seg_dirs[idx]
         delta = p - center
         lateral = float(seg_dir[0] * delta[1] - seg_dir[1] * delta[0])
         track_yaw = float(self.seg_yaws[idx])
         return Projection(
-            s=float((self.s_starts[idx] + t[idx] * self.seg_lengths[idx]) % self.length),
+            s=float((self.s_starts[idx] + t[local_idx] * self.seg_lengths[idx]) % self.length),
             x=float(center[0]),
             y=float(center[1]),
             yaw=track_yaw,

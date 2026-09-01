@@ -47,7 +47,7 @@ uv run kart-rl-train
 uv run kart-rl-train --timesteps 5000
 ```
 
-デフォルトでは `models/ppo_kart.zip` に保存されます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」を負にしています。
+デフォルトでは `models/ppo_kart.zip` に保存されます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
 
 ## 評価とビューア
 

@@ -31,6 +31,7 @@ reward:
   heading_error: 0.15
   steer: 0.02
   action_smooth: 0.03
+  wasted_motion: 1.5
   wall_collision: 120.0
   lap_complete: 250.0
 

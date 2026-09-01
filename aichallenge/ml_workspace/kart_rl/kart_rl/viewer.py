@@ -59,6 +59,7 @@ def main() -> None:
 
     bounds = (track.min(axis=0) - half_width - 4.0, track.max(axis=0) + half_width + 4.0)
     center_line = world_to_screen(track, bounds, screen_size).astype(int)
+    driven_line = world_to_screen(frames[:, 1:3], bounds, screen_size).astype(int)
     left_right = []
     if len(left_boundary) and len(right_boundary):
         left_right.append(world_to_screen(left_boundary, bounds, screen_size).astype(int))
@@ -98,6 +99,8 @@ def main() -> None:
         for border in left_right:
             pygame.draw.lines(screen, (84, 88, 82), True, border, width=2)
         pygame.draw.lines(screen, (34, 92, 132), True, center_line, width=3)
+        if idx > 1:
+            pygame.draw.lines(screen, (198, 58, 42), False, driven_line[: idx + 1], width=2)
 
         frame = frames[idx]
         draw_vehicle(screen, frame[1:3], float(frame[3]), vehicle_length, vehicle_width, bounds, screen_size)
