@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from stable_baselines3 import PPO, SAC
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -79,6 +80,22 @@ def update_latest_symlink(target: Path, link_path: Path) -> None:
     link_path.symlink_to(os.path.relpath(target, link_path.parent))
 
 
+def save_training_artifacts(model: BaseAlgorithm, config: dict, train_cfg: dict) -> Path:
+    base_model_path = resolve_path(train_cfg["model_path"], config)
+    model_path = make_run_model_path(base_model_path)
+    model.save(str(model_path))
+    config_out = model_path.parent / "config.yaml"
+    shutil.copy2(config["_config_path"], config_out)
+    if train_cfg.get("algorithm", "ppo").lower() == "ppo":
+        policy_path = export_ppo_policy_npz(model, Path(model_path))
+        update_latest_symlink(policy_path, base_model_path.with_name(f"{base_model_path.name}_latest_policy.npz"))
+        print(f"Saved policy: {policy_path}")
+    update_latest_symlink(model_path.with_suffix(".zip"), base_model_path.with_name(f"{base_model_path.name}_latest.zip"))
+    print(f"Saved config: {config_out}")
+    print(f"Saved model: {model_path}.zip")
+    return model_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
@@ -101,21 +118,17 @@ def main() -> None:
     env = vec_cls([make_env(config, seed, i) for i in range(n_envs)])
     model = build_model(config, env)
     timesteps = int(args.timesteps or train_cfg["total_timesteps"])
-    model.learn(total_timesteps=timesteps, progress_bar=True)
-
-    base_model_path = resolve_path(train_cfg["model_path"], config)
-    model_path = make_run_model_path(base_model_path)
-    model.save(str(model_path))
-    config_out = model_path.parent / "config.yaml"
-    shutil.copy2(config["_config_path"], config_out)
-    if train_cfg.get("algorithm", "ppo").lower() == "ppo":
-        policy_path = export_ppo_policy_npz(model, Path(model_path))
-        update_latest_symlink(policy_path, base_model_path.with_name(f"{base_model_path.name}_latest_policy.npz"))
-        print(f"Saved policy: {policy_path}")
-    update_latest_symlink(model_path.with_suffix(".zip"), base_model_path.with_name(f"{base_model_path.name}_latest.zip"))
-    print(f"Saved config: {config_out}")
-    env.close()
-    print(f"Saved model: {model_path}.zip")
+    try:
+        try:
+            model.learn(total_timesteps=timesteps, progress_bar=True)
+        except KeyboardInterrupt:
+            print("Training interrupted. Saving current model before exit...")
+        save_training_artifacts(model, config, train_cfg)
+    finally:
+        try:
+            env.close()
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":

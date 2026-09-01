@@ -73,6 +73,6 @@ train:
   clip_range: 0.2
 
 viewer:
-  model_path: "models/ppo_kart_lidar.zip"
+  model_path: "models/ppo_kart_lidar_latest.zip"
   rollout_path: "rollouts/latest_lidar.npz"
   fps: 50
