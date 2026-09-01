@@ -39,6 +39,7 @@ env:
   min_moving_speed_mps: 0.5
   max_stopped_steps: 120
   boundary_margin_m: 0.15
+  localization_delay_sec: 0.5
   pure_pursuit_lookahead_base_m: 2.0
   pure_pursuit_lookahead_speed_gain: 0.8
   max_steer_correction_ratio: 0.10

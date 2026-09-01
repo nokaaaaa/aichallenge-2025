@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -58,6 +59,7 @@ class RacingKartEnv(gym.Env):
         self.min_moving_speed = float(env_cfg.get("min_moving_speed_mps", 0.5))
         self.max_stopped_steps = int(env_cfg.get("max_stopped_steps", 80))
         self.boundary_margin = float(env_cfg.get("boundary_margin_m", 0.15))
+        self.localization_delay_sec = max(0.0, float(env_cfg.get("localization_delay_sec", 0.5)))
         self.lookahead_base = float(env_cfg.get("pure_pursuit_lookahead_base_m", 2.0))
         self.lookahead_speed_gain = float(env_cfg.get("pure_pursuit_lookahead_speed_gain", 0.8))
         self.max_steer_correction_ratio = float(env_cfg.get("max_steer_correction_ratio", 0.35))
@@ -92,6 +94,9 @@ class RacingKartEnv(gym.Env):
         self.prev_x = 0.0
         self.prev_y = 0.0
         self.stopped_steps = 0
+        self.localized_state = VehicleState(0.0, 0.0, 0.0, 0.0, 0.0)
+        self.localized_prev_s = 0.0
+        self._state_history: deque[tuple[float, VehicleState]] = deque()
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
@@ -111,7 +116,11 @@ class RacingKartEnv(gym.Env):
         self.prev_x = self.state.x
         self.prev_y = self.state.y
         self.stopped_steps = 0
-        return self._obs(proj), self._info(proj, collision=False)
+        self.localized_state = self._copy_state(self.state)
+        self.localized_prev_s = proj.s
+        self._state_history.clear()
+        self._state_history.append((0.0, self._copy_state(self.state)))
+        return self._obs(proj), self._info(proj, collision=False, localized_proj=proj)
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
@@ -143,6 +152,8 @@ class RacingKartEnv(gym.Env):
         collision = self._is_collision(proj)
         if collision:
             proj = self._resolve_collision(proj)
+        self._append_state_history(self.steps * self.dt, self.state)
+        localized_proj = self._update_localized_state(self.steps * self.dt)
         lap_finished = self.lap_count >= self.finish_laps
         stopped = self.stopped_steps >= self.max_stopped_steps
         terminated = bool(collision or lap_finished or stopped)
@@ -152,7 +163,7 @@ class RacingKartEnv(gym.Env):
         self.prev_action = action.copy()
         self.prev_x = self.state.x
         self.prev_y = self.state.y
-        return self._obs(proj), reward, terminated, truncated, self._info(proj, collision=collision)
+        return self._obs(localized_proj), reward, terminated, truncated, self._info(proj, collision=collision, localized_proj=localized_proj)
 
     def _is_collision(self, proj) -> bool:
         margin = self.boundary_margin
@@ -178,7 +189,7 @@ class RacingKartEnv(gym.Env):
         accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
         speed_step = float(np.clip(speed_error, -accel_limit * self.dt, accel_limit * self.dt))
         self.state.speed = float(np.clip(self.state.speed + speed_step, self.min_speed, self.max_speed))
-        base_steer = self._pure_pursuit_steer(self.prev_s)
+        base_steer = self._pure_pursuit_steer(self.localized_prev_s)
         steer_correction = float(action[1]) * self.max_steer * self.max_steer_correction_ratio
         self.state.steer = float(np.clip(base_steer + steer_correction, -self.max_steer, self.max_steer))
 
@@ -202,10 +213,60 @@ class RacingKartEnv(gym.Env):
     def _pure_pursuit_steer(self, s: float) -> float:
         lookahead = self.lookahead_base + self.lookahead_speed_gain * self.state.speed
         target_x, target_y, _, _ = self.track.sample_at(s + lookahead)
-        target_angle = np.arctan2(target_y - self.state.y, target_x - self.state.x)
-        alpha = wrap_angle(target_angle - self.state.yaw)
+        target_angle = np.arctan2(target_y - self.localized_state.y, target_x - self.localized_state.x)
+        alpha = wrap_angle(target_angle - self.localized_state.yaw)
         steer = np.arctan2(2.0 * self.wheelbase * np.sin(alpha), lookahead)
         return float(np.clip(steer, -self.max_steer, self.max_steer))
+
+    def _append_state_history(self, time_sec: float, state: VehicleState) -> None:
+        self._state_history.append((time_sec, self._copy_state(state)))
+        earliest_needed = time_sec - self.localization_delay_sec - self.dt
+        while len(self._state_history) > 2 and self._state_history[1][0] <= earliest_needed:
+            self._state_history.popleft()
+
+    def _update_localized_state(self, time_sec: float):
+        self.localized_state = self._delayed_state(time_sec - self.localization_delay_sec)
+        localized_proj = self.track.project_near(
+            self.localized_state.x,
+            self.localized_state.y,
+            self.localized_state.yaw,
+            near_s=self.localized_prev_s,
+            window_m=self.projection_window_m,
+        )
+        self.localized_prev_s = localized_proj.s
+        return localized_proj
+
+    def _delayed_state(self, target_time_sec: float) -> VehicleState:
+        if not self._state_history:
+            return self._copy_state(self.state)
+        if target_time_sec <= self._state_history[0][0]:
+            return self._copy_state(self._state_history[0][1])
+        history_iter = iter(self._state_history)
+        prev_time, prev_state = next(history_iter)
+        for next_time, next_state in history_iter:
+            t0, s0 = prev_time, prev_state
+            t1, s1 = next_time, next_state
+            if t0 <= target_time_sec <= t1:
+                ratio = (target_time_sec - t0) / max(t1 - t0, 1e-9)
+                return VehicleState(
+                    x=float(s0.x + ratio * (s1.x - s0.x)),
+                    y=float(s0.y + ratio * (s1.y - s0.y)),
+                    yaw=float(wrap_angle(s0.yaw + ratio * wrap_angle(s1.yaw - s0.yaw))),
+                    speed=float(s0.speed + ratio * (s1.speed - s0.speed)),
+                    steer=float(s0.steer + ratio * (s1.steer - s0.steer)),
+                )
+            prev_time, prev_state = next_time, next_state
+        return self._copy_state(self._state_history[-1][1])
+
+    @staticmethod
+    def _copy_state(state: VehicleState) -> VehicleState:
+        return VehicleState(
+            x=float(state.x),
+            y=float(state.y),
+            yaw=float(state.yaw),
+            speed=float(state.speed),
+            steer=float(state.steer),
+        )
 
     def _reward(
         self,
@@ -237,20 +298,27 @@ class RacingKartEnv(gym.Env):
             reward += r["lap_complete"]
         return float(reward)
 
-    def _info(self, proj, collision: bool) -> dict[str, Any]:
+    def _info(self, proj, collision: bool, localized_proj=None) -> dict[str, Any]:
+        if localized_proj is None:
+            localized_proj = proj
         return {
             "x": self.state.x,
             "y": self.state.y,
             "yaw": self.state.yaw,
+            "localized_x": self.localized_state.x,
+            "localized_y": self.localized_state.y,
+            "localized_yaw": self.localized_state.yaw,
             "speed": self.state.speed,
             "steer": self.state.steer,
             "s": self.progress_s,
             "lap_progress": (self.progress_s % self.track.length) / self.track.length,
             "lap_count": self.lap_count,
             "lateral_error": proj.lateral_error,
+            "localized_lateral_error": localized_proj.lateral_error,
             "lateral_min": proj.lateral_min,
             "lateral_max": proj.lateral_max,
             "heading_error": proj.heading_error,
+            "localized_heading_error": localized_proj.heading_error,
             "collision": collision,
             "stopped": self.stopped_steps >= self.max_stopped_steps,
             "time": self.steps * self.dt,
