@@ -31,12 +31,14 @@ class Track:
         curvature_scale: float = 12.0,
         left_boundary: np.ndarray | None = None,
         right_boundary: np.ndarray | None = None,
+        lane_segments: np.ndarray | None = None,
     ):
         if len(points) < 3:
             raise ValueError("Track requires at least 3 points")
         self.points = points.astype(np.float64)
         self.left_boundary = left_boundary.astype(np.float64) if left_boundary is not None else None
         self.right_boundary = right_boundary.astype(np.float64) if right_boundary is not None else None
+        self.lane_segments = lane_segments.astype(np.float64) if lane_segments is not None else None
         self.half_width_m = float(half_width_m)
         self.curvature_scale = float(curvature_scale)
 
@@ -57,22 +59,33 @@ class Track:
         self.curvatures = self._compute_curvatures()
 
     @classmethod
-    def from_csv(cls, path, half_width_m: float, curvature_scale: float = 12.0) -> "Track":
+    def from_csv(
+        cls,
+        path,
+        half_width_m: float,
+        curvature_scale: float = 12.0,
+        lane_csv_path: str | Path | None = None,
+    ) -> "Track":
         data = np.genfromtxt(path, delimiter=",", names=True)
         points = np.column_stack([data["x"], data["y"]])
-        points = points - points[0]
-        return cls(points=points, half_width_m=half_width_m, curvature_scale=curvature_scale)
+        origin = points[0].copy()
+        points = points - origin
+        lane_segments = _load_lane_segments(lane_csv_path, origin) if lane_csv_path else None
+        return cls(points=points, half_width_m=half_width_m, curvature_scale=curvature_scale, lane_segments=lane_segments)
 
     @classmethod
     def from_lane_csv(cls, path: str | Path, half_width_m: float | str, curvature_scale: float = 12.0) -> "Track":
         data = np.genfromtxt(path, delimiter=",")
         if data.ndim != 2 or data.shape[1] < 4:
             raise ValueError("lane CSV must have at least 4 columns: left_x,left_y,right_x,right_y")
-        left = _clean_polyline(data[:, 0:2])
-        right = _clean_polyline(data[:, 2:4])
-        sample_count = max(len(left), len(right))
-        left = _resample_closed_polyline(left, sample_count)
-        right = _resample_closed_polyline(right, sample_count)
+        rows = data[np.isfinite(data[:, :4]).all(axis=1), :4]
+        left = rows[:, 0:2]
+        right = rows[:, 2:4]
+        center = 0.5 * (left + right)
+        _, unique_indices = np.unique(np.round(center, 3), axis=0, return_index=True)
+        unique_indices = np.sort(unique_indices)
+        left = left[unique_indices]
+        right = right[unique_indices]
         widths = np.linalg.norm(right - left, axis=1)
         center = 0.5 * (left + right)
         origin = center[0].copy()
@@ -189,3 +202,12 @@ def _resample_closed_polyline(points: np.ndarray, sample_count: int) -> np.ndarr
     indices = np.searchsorted(cumulative[1:], samples, side="right")
     ratio = (samples - cumulative[indices]) / lens[indices]
     return starts[indices] + vecs[indices] * ratio[:, None]
+
+
+def _load_lane_segments(path: str | Path, origin: np.ndarray) -> np.ndarray:
+    data = np.genfromtxt(path, delimiter=",")
+    if data.ndim != 2 or data.shape[1] < 4:
+        raise ValueError("lane CSV must have at least 4 columns: x1,y1,x2,y2")
+    rows = data[np.isfinite(data[:, :4]).all(axis=1), :4]
+    segments = rows.reshape(-1, 2, 2)
+    return segments - origin

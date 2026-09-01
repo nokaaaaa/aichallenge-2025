@@ -46,6 +46,7 @@ def main() -> None:
     track = data["track"]
     left_boundary = data["left_boundary"] if "left_boundary" in data else np.empty((0, 2), dtype=np.float32)
     right_boundary = data["right_boundary"] if "right_boundary" in data else np.empty((0, 2), dtype=np.float32)
+    lane_segments = data["lane_segments"] if "lane_segments" in data else np.empty((0, 2, 2), dtype=np.float32)
     half_width = float(data["half_width"])
     vehicle_length = float(data["vehicle_length"])
     vehicle_width = float(data["vehicle_width"])
@@ -60,6 +61,8 @@ def main() -> None:
     bound_points = [track, frames[:, 1:3]]
     if len(left_boundary) and len(right_boundary):
         bound_points.extend([left_boundary, right_boundary])
+    if len(lane_segments):
+        bound_points.append(lane_segments.reshape(-1, 2))
     all_points = np.vstack(bound_points)
     bounds = (all_points.min(axis=0) - 4.0, all_points.max(axis=0) + 4.0)
     center_line = world_to_screen(track, bounds, screen_size).astype(int)
@@ -102,6 +105,9 @@ def main() -> None:
         screen.fill((236, 238, 232))
         for border in left_right:
             pygame.draw.lines(screen, (84, 88, 82), True, border, width=2)
+        for segment in lane_segments:
+            pts = world_to_screen(segment, bounds, screen_size).astype(int)
+            pygame.draw.line(screen, (116, 120, 114), pts[0], pts[1], width=1)
         pygame.draw.lines(screen, (34, 92, 132), True, center_line, width=3)
         if idx > 1:
             pygame.draw.lines(screen, (198, 58, 42), False, driven_line[: idx + 1], width=2)

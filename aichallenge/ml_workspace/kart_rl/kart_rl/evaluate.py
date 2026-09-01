@@ -68,6 +68,9 @@ def main() -> None:
         right_boundary=env.track.right_boundary.astype(np.float32)
         if env.track.right_boundary is not None
         else np.empty((0, 2), dtype=np.float32),
+        lane_segments=env.track.lane_segments.astype(np.float32)
+        if env.track.lane_segments is not None
+        else np.empty((0, 2, 2), dtype=np.float32),
         half_width=np.float32(env.track.half_width_m),
         vehicle_length=np.float32(env.vehicle_length),
         vehicle_width=np.float32(env.vehicle_width),

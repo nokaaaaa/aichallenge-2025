@@ -43,6 +43,9 @@ class RacingKartEnv(gym.Env):
                 track_path,
                 half_width_m=float(track_cfg["half_width_m"]),
                 curvature_scale=track_cfg.get("curvature_scale", 12.0),
+                lane_csv_path=resolve_path(track_cfg["lane_csv_path"], config, must_exist=True)
+                if track_cfg.get("lane_csv_path")
+                else None,
             )
         else:
             raise ValueError(f"Unsupported track format: {track_format}")
@@ -54,6 +57,10 @@ class RacingKartEnv(gym.Env):
         self.start_noise_yaw = float(env_cfg.get("start_noise_yaw_rad", 0.0))
         self.min_moving_speed = float(env_cfg.get("min_moving_speed_mps", 0.5))
         self.max_stopped_steps = int(env_cfg.get("max_stopped_steps", 80))
+        self.boundary_margin = float(env_cfg.get("boundary_margin_m", 0.15))
+        self.lookahead_base = float(env_cfg.get("pure_pursuit_lookahead_base_m", 2.0))
+        self.lookahead_speed_gain = float(env_cfg.get("pure_pursuit_lookahead_speed_gain", 0.8))
+        self.max_steer_correction_ratio = float(env_cfg.get("max_steer_correction_ratio", 0.35))
         self.wheelbase = float(vehicle_cfg["wheelbase_m"])
         self.vehicle_width = float(vehicle_cfg["width_m"])
         self.vehicle_length = float(vehicle_cfg["length_m"])
@@ -67,6 +74,9 @@ class RacingKartEnv(gym.Env):
         self.lookahead = (2.0, 5.0, 10.0, 18.0)
         self.projection_window_m = max(20.0, self.max_speed * self.dt * 10.0)
 
+        # action = [target_speed_ratio, steer_correction_ratio]
+        # target_speed_ratio: -1..1 maps to min_speed..max_speed
+        # steer_correction_ratio adjusts the pure-pursuit steering baseline.
         self.action_space = spaces.Box(
             low=np.array([-1.0, -1.0], dtype=np.float32),
             high=np.array([1.0, 1.0], dtype=np.float32),
@@ -105,10 +115,14 @@ class RacingKartEnv(gym.Env):
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
-        accel = self.max_accel * max(float(action[0]), 0.0) + self.max_brake * min(float(action[0]), 0.0)
-        steer_rate = self.max_steer_rate * float(action[1])
-        self.state.speed = float(np.clip(self.state.speed + accel * self.dt, self.min_speed, self.max_speed))
-        self.state.steer = float(np.clip(self.state.steer + steer_rate * self.dt, -self.max_steer, self.max_steer))
+        target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
+        speed_error = target_speed - self.state.speed
+        accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
+        speed_step = float(np.clip(speed_error, -accel_limit * self.dt, accel_limit * self.dt))
+        self.state.speed = float(np.clip(self.state.speed + speed_step, self.min_speed, self.max_speed))
+        base_steer = self._pure_pursuit_steer(self.prev_s)
+        steer_correction = float(action[1]) * self.max_steer * self.max_steer_correction_ratio
+        self.state.steer = float(np.clip(base_steer + steer_correction, -self.max_steer, self.max_steer))
         self.state.x += self.state.speed * np.cos(self.state.yaw) * self.dt
         self.state.y += self.state.speed * np.sin(self.state.yaw) * self.dt
         self.state.yaw = float(wrap_angle(self.state.yaw + self.state.speed / self.wheelbase * np.tan(self.state.steer) * self.dt))
@@ -133,7 +147,7 @@ class RacingKartEnv(gym.Env):
         self.lap_count = max(0, int(self.progress_s / self.track.length))
         self.stopped_steps = self.stopped_steps + 1 if self.state.speed < self.min_moving_speed else 0
 
-        margin = 0.5 * self.vehicle_width
+        margin = self.boundary_margin
         collision = proj.lateral_error < proj.lateral_min + margin or proj.lateral_error > proj.lateral_max - margin
         if collision:
             clamped_lateral = float(np.clip(proj.lateral_error, proj.lateral_min + margin, proj.lateral_max - margin))
@@ -174,6 +188,14 @@ class RacingKartEnv(gym.Env):
             ]
         )
         return np.clip(obs, -1.0, 1.0).astype(np.float32)
+
+    def _pure_pursuit_steer(self, s: float) -> float:
+        lookahead = self.lookahead_base + self.lookahead_speed_gain * self.state.speed
+        target_x, target_y, _, _ = self.track.sample_at(s + lookahead)
+        target_angle = np.arctan2(target_y - self.state.y, target_x - self.state.x)
+        alpha = wrap_angle(target_angle - self.state.yaw)
+        steer = np.arctan2(2.0 * self.wheelbase * np.sin(alpha), lookahead)
+        return float(np.clip(steer, -self.max_steer, self.max_steer))
 
     def _reward(
         self,

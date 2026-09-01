@@ -2,7 +2,7 @@
 
 Python + Gymnasium + Stable-Baselines3 + uv で動く、レーシングカート用のローカル強化学習ワークスペースです。
 
-`configs/lane.csv` を固定レーン情報として使い、既存MPC設定に合わせた簡易キネマティック自転車モデルで学習します。ROS/AWSIMは使わないため、学習ループの動作確認を軽く回せます。
+既存racelineを1周の進捗軸、`configs/lane.csv` を固定レーン情報として使い、既存MPC設定に合わせた簡易キネマティック自転車モデルで学習します。ROS/AWSIMは使わないため、学習ループの動作確認を軽く回せます。
 
 ## 構成
 
@@ -69,13 +69,12 @@ uv run kart-rl-viewer
 - `left/right`: 1秒単位でシーク
 - `r`: 最初から再生
 
-赤線はモデルが実際に走った軌跡です。青線はレーン境界から作った中心線、灰色線は `configs/lane.csv` の左右境界です。
+赤線はモデルが実際に走った軌跡です。青線は1周の進捗軸に使うraceline、灰色線は `configs/lane.csv` のレーン線分です。
 
 ## 固定設定
 
-- レーン情報: `aichallenge/ml_workspace/kart_rl/configs/lane.csv`
-- コース中心線: `lane.csv` の左右境界点の中点から生成
-- コース半幅: `lane.csv` の左右境界距離から自動推定
+- 進捗軸: `aichallenge/workspace/src/aichallenge_submit/simple_trajectory_generator/data/raceline_cctb_30km_wide.csv`
+- レーン表示: `aichallenge/ml_workspace/kart_rl/configs/lane.csv`
 - 車両ホイールベース: `1.087 m`
 - 車幅: `1.45 m`
 - 最大速度: `8.33 m/s`

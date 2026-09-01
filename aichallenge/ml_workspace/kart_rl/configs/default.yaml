@@ -1,9 +1,10 @@
 seed: 42
 
 track:
-  csv_path: "lane.csv"
-  format: "lane_boundaries"
-  half_width_m: "auto"
+  csv_path: "../../workspace/src/aichallenge_submit/simple_trajectory_generator/data/raceline_cctb_30km_wide.csv"
+  lane_csv_path: "lane.csv"
+  format: "raceline"
+  half_width_m: 3.0
   curvature_scale: 12.0
 
 vehicle:
@@ -19,30 +20,34 @@ vehicle:
 
 env:
   dt: 0.05
-  max_episode_steps: 2400
-  start_noise_m: 0.25
-  start_noise_yaw_rad: 0.08
+  max_episode_steps: 4000
+  start_noise_m: 0.1
+  start_noise_yaw_rad: 0.03
   finish_laps: 1
   min_moving_speed_mps: 0.5
-  max_stopped_steps: 80
+  max_stopped_steps: 120
+  boundary_margin_m: 0.15
+  pure_pursuit_lookahead_base_m: 2.0
+  pure_pursuit_lookahead_speed_gain: 0.8
+  max_steer_correction_ratio: 0.10
 
 reward:
-  progress: 18.0
-  speed: 0.08
-  lateral_error: 0.8
-  heading_error: 0.15
-  steer: 0.02
-  action_smooth: 0.03
-  wasted_motion: 2.0
-  low_speed: 0.04
-  stopped: 80.0
-  wall_collision: 120.0
-  lap_complete: 250.0
+  progress: 35.0
+  speed: 0.04
+  lateral_error: 1.2
+  heading_error: 0.5
+  steer: 0.01
+  action_smooth: 0.02
+  wasted_motion: 2.5
+  low_speed: 0.08
+  stopped: 120.0
+  wall_collision: 300.0
+  lap_complete: 1000.0
 
 train:
   algorithm: ppo
   device: "cuda"
-  total_timesteps: 100000
+  total_timesteps: 500000
   n_envs: 4
   model_path: "models/ppo_kart"
   tensorboard_log: "runs/tensorboard"
