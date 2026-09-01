@@ -60,6 +60,7 @@ class RacingKartEnv(gym.Env):
         self.max_stopped_steps = int(env_cfg.get("max_stopped_steps", 80))
         self.boundary_margin = float(env_cfg.get("boundary_margin_m", 0.15))
         self.localization_delay_sec = max(0.0, float(env_cfg.get("localization_delay_sec", 0.5)))
+        self.steering_delay_sec = max(0.0, float(env_cfg.get("steering_delay_sec", 0.2)))
         self.lookahead_base = float(env_cfg.get("pure_pursuit_lookahead_base_m", 2.0))
         self.lookahead_speed_gain = float(env_cfg.get("pure_pursuit_lookahead_speed_gain", 0.8))
         self.max_steer_correction_ratio = float(env_cfg.get("max_steer_correction_ratio", 0.35))
@@ -94,9 +95,11 @@ class RacingKartEnv(gym.Env):
         self.prev_x = 0.0
         self.prev_y = 0.0
         self.stopped_steps = 0
+        self.commanded_steer = 0.0
         self.localized_state = VehicleState(0.0, 0.0, 0.0, 0.0, 0.0)
         self.localized_prev_s = 0.0
         self._state_history: deque[tuple[float, VehicleState]] = deque()
+        self._steer_command_history: deque[tuple[float, float]] = deque()
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
@@ -116,10 +119,13 @@ class RacingKartEnv(gym.Env):
         self.prev_x = self.state.x
         self.prev_y = self.state.y
         self.stopped_steps = 0
+        self.commanded_steer = 0.0
         self.localized_state = self._copy_state(self.state)
         self.localized_prev_s = proj.s
         self._state_history.clear()
         self._state_history.append((0.0, self._copy_state(self.state)))
+        self._steer_command_history.clear()
+        self._steer_command_history.append((0.0, self.commanded_steer))
         return self._obs(proj), self._info(proj, collision=False, localized_proj=proj)
 
     def step(self, action):
@@ -191,7 +197,7 @@ class RacingKartEnv(gym.Env):
         self.state.speed = float(np.clip(self.state.speed + speed_step, self.min_speed, self.max_speed))
         base_steer = self._pure_pursuit_steer(self.localized_prev_s)
         steer_correction = float(action[1]) * self.max_steer * self.max_steer_correction_ratio
-        self.state.steer = float(np.clip(base_steer + steer_correction, -self.max_steer, self.max_steer))
+        self._set_commanded_steer(base_steer + steer_correction)
 
     def _obs(self, proj) -> np.ndarray:
         obs = np.concatenate(
@@ -223,6 +229,28 @@ class RacingKartEnv(gym.Env):
         earliest_needed = time_sec - self.localization_delay_sec - self.dt
         while len(self._state_history) > 2 and self._state_history[1][0] <= earliest_needed:
             self._state_history.popleft()
+
+    def _set_commanded_steer(self, steer: float) -> None:
+        time_sec = self.steps * self.dt
+        self.commanded_steer = float(np.clip(steer, -self.max_steer, self.max_steer))
+        self._append_steer_command(time_sec, self.commanded_steer)
+        self.state.steer = self._delayed_steer(time_sec - self.steering_delay_sec)
+
+    def _append_steer_command(self, time_sec: float, steer: float) -> None:
+        self._steer_command_history.append((time_sec, float(steer)))
+        earliest_needed = time_sec - self.steering_delay_sec - self.dt
+        while len(self._steer_command_history) > 2 and self._steer_command_history[1][0] <= earliest_needed:
+            self._steer_command_history.popleft()
+
+    def _delayed_steer(self, target_time_sec: float) -> float:
+        if not self._steer_command_history:
+            return self.commanded_steer
+        delayed_steer = self._steer_command_history[0][1]
+        for command_time, command_steer in self._steer_command_history:
+            if command_time > target_time_sec:
+                break
+            delayed_steer = command_steer
+        return float(delayed_steer)
 
     def _update_localized_state(self, time_sec: float):
         self.localized_state = self._delayed_state(time_sec - self.localization_delay_sec)
@@ -310,6 +338,7 @@ class RacingKartEnv(gym.Env):
             "localized_yaw": self.localized_state.yaw,
             "speed": self.state.speed,
             "steer": self.state.steer,
+            "commanded_steer": self.commanded_steer,
             "s": self.progress_s,
             "lap_progress": (self.progress_s % self.track.length) / self.track.length,
             "lap_count": self.lap_count,
