@@ -2,7 +2,7 @@
 
 Python + Gymnasium + Stable-Baselines3 + uv で動く、レーシングカート用のローカル強化学習ワークスペースです。
 
-既存racelineを1周の進捗軸、`configs/lane.csv` を固定レーン情報として使い、既存MPC設定に合わせた簡易キネマティック自転車モデルで学習します。ROS/AWSIMは使わないため、学習ループの動作確認を軽く回せます。
+既存racelineを1周の進捗軸、`configs/lane.csv` を固定レーン情報として使い、車両先頭LiDARの距離配列だけを入力にして学習します。ROS/AWSIMは使わないため、学習ループの動作確認を軽く回せます。
 
 ## 構成
 
@@ -10,6 +10,8 @@ Python + Gymnasium + Stable-Baselines3 + uv で動く、レーシングカート
 kart_rl/
 ├─ pyproject.toml
 ├─ configs/default.yaml
+├─ configs/state.yaml
+├─ configs/lidar.yaml
 ├─ configs/lane.csv
 ├─ kart_rl/
 │  ├─ env.py       # Gymnasium環境
@@ -41,13 +43,20 @@ uv run kart-rl-train --check-env
 uv run kart-rl-train
 ```
 
+`default.yaml` はLiDAR観測版です。状態量と参照経路情報を観測に含める旧設定で学習する場合:
+
+```bash
+uv run kart-rl-train --config configs/state.yaml
+```
+
 短く試す場合:
 
 ```bash
 uv run kart-rl-train --timesteps 5000
+uv run kart-rl-train --config configs/state.yaml --timesteps 5000
 ```
 
-デフォルトでは `models/ppo_kart.zip` に保存されます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
+デフォルトでは `models/ppo_kart_lidar.zip` に保存されます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
 
 ## 評価とビューア
 
@@ -55,12 +64,14 @@ uv run kart-rl-train --timesteps 5000
 
 ```bash
 uv run kart-rl-eval
+uv run kart-rl-eval --config configs/state.yaml
 ```
 
 ビューアを起動します。
 
 ```bash
 uv run kart-rl-viewer
+uv run kart-rl-viewer --config configs/state.yaml
 ```
 
 操作:

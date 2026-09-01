@@ -9,12 +9,12 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from kart_rl.config import PACKAGE_ROOT, load_config, resolve_path
-from kart_rl.env import RacingKartEnv
+from kart_rl.env_factory import make_racing_env
 
 
 def make_env(config, seed: int, rank: int):
     def _init():
-        env = RacingKartEnv(config)
+        env = make_racing_env(config)
         env.reset(seed=seed + rank, options={"random_start": True})
         return Monitor(env)
 
@@ -58,7 +58,7 @@ def main() -> None:
     seed = int(config.get("seed", 42))
 
     if args.check_env:
-        env = RacingKartEnv(config)
+        env = make_racing_env(config)
         check_env(env, warn=True)
         print("Gymnasium environment check passed.")
         return

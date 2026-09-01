@@ -1,6 +1,6 @@
 # kart_rl Machine Learning Spec
 
-この文書は `aichallenge/ml_workspace/kart_rl` の強化学習環境について、入力、出力、報酬関数、終了条件、生成物をまとめたものです。
+この文書は `aichallenge/ml_workspace/kart_rl` の強化学習環境について、入力、出力、報酬関数、終了条件、生成物をまとめたものです。現在のデフォルト設定 `configs/default.yaml` はLiDAR観測版です。
 
 ## 目的
 
@@ -23,7 +23,7 @@ track:
   format: "raceline"
 ```
 
-このCSVは1周の進捗 `s`、ラップ完了判定、前方カーブ情報、pure pursuitの参照線に使います。
+このCSVは1周の進捗 `s`、ラップ完了判定、ビューアの参照経路、状態観測版の前方カーブ情報とpure pursuit参照線に使います。
 
 ### レーン境界
 
@@ -61,7 +61,39 @@ vehicle:
 
 制御周期は `env.dt: 0.05` 秒です。
 
-## 観測
+## デフォルト観測: LiDAR
+
+`configs/default.yaml` は、車両先頭LiDARの距離配列だけを方策入力にします。
+
+```yaml
+env:
+  type: "lidar"
+```
+
+横偏差、方位偏差、速度、参照線曲率は方策の観測には含めません。ただし報酬計算、ラップ判定、壁接触判定には環境内部で参照経路と境界情報を使います。
+
+LiDARは車両先頭中央に取り付けた想定です。
+
+```yaml
+lidar:
+  angle_min: -1.5666074752807617
+  angle_max: 1.5707963705062866
+  angle_increment: 0.004188789986073971
+  time_increment: 0.00006666666740784422
+  scan_time: 0.05000000074505806
+  range_min: 0.0
+  range_max: 25.0
+```
+
+ビーム数は750本です。観測空間は `Box(0, 1, shape=(750,), dtype=float32)` で、各値は `range / range_max` です。交点がない場合は `range_max` になります。
+
+## 状態観測版
+
+`configs/state.yaml` を指定すると、LiDARではなく状態量と参照経路情報を観測に使う旧環境で動かせます。
+
+```bash
+uv run kart-rl-train --config configs/state.yaml
+```
 
 Gymnasiumの観測空間は `Box(-1, 1, shape=(8,), dtype=float32)` です。
 
@@ -80,7 +112,34 @@ Gymnasiumの観測空間は `Box(-1, 1, shape=(8,), dtype=float32)` です。
 
 ## 行動
 
-Gymnasiumの行動空間は `Box(-1, 1, shape=(2,), dtype=float32)` です。
+デフォルトのLiDAR版では、行動は直接車両制御です。
+
+| Index | 名前 | 内容 |
+|---:|---|---|
+| 0 | target_speed_ratio | 目標速度 |
+| 1 | steer_ratio | ステア角 |
+
+`action[1]` は `[-1, 1]` から `[-max_steer_rad, max_steer_rad]` に変換します。状態観測版のようなpure pursuit補助は使いません。
+
+デフォルトLiDAR版の出力先:
+
+```text
+models/ppo_kart_lidar.zip
+rollouts/latest_lidar.npz
+runs/tensorboard_lidar/
+```
+
+実行例:
+
+```bash
+uv run kart-rl-train
+uv run kart-rl-eval
+uv run kart-rl-viewer
+```
+
+### 状態観測版の行動
+
+状態観測版の行動空間も `Box(-1, 1, shape=(2,), dtype=float32)` です。
 
 | Index | 名前 | 内容 |
 |---:|---|---|
@@ -97,9 +156,19 @@ target_speed = min_speed + 0.5 * (action[0] + 1) * (max_speed - min_speed)
 
 現在速度から目標速度へ、加速度上限またはブレーキ上限の範囲内で近づけます。
 
-### ステア
+### LiDAR版のステア
 
-ステアはpure pursuitをベースにし、RLは微小補正だけを学びます。
+LiDAR版のステアはRL出力をそのまま目標ステア角に変換します。
+
+```text
+steer_target = action[1] * max_steer
+```
+
+実際のステア角は `max_steer_rate_radps` の範囲内で `steer_target` に近づけます。
+
+### 状態観測版のステア
+
+状態観測版のステアはpure pursuitをベースにし、RLは微小補正だけを学びます。
 
 ```text
 steer = pure_pursuit_steer + action[1] * max_steer * max_steer_correction_ratio
@@ -190,7 +259,7 @@ train:
   total_timesteps: 500000
   n_envs: 4
   learning_rate: 0.0003
-  n_steps: 1024
+  n_steps: 256
   batch_size: 256
   gamma: 0.995
   gae_lambda: 0.95
@@ -206,7 +275,7 @@ GPUは `device: "cuda"` で指定しています。ただし、現在の方策�
 学習済みモデル:
 
 ```text
-models/ppo_kart.zip
+models/ppo_kart_lidar.zip
 ```
 
 生成コマンド:
@@ -217,11 +286,27 @@ uv run kart-rl-train
 
 ### TensorBoardログ
 
+デフォルトLiDAR版:
+
+```text
+runs/tensorboard_lidar/
+```
+
+状態観測版:
+
 ```text
 runs/tensorboard/
 ```
 
 ### 評価ロールアウト
+
+デフォルトLiDAR版:
+
+```text
+rollouts/latest_lidar.npz
+```
+
+状態観測版:
 
 ```text
 rollouts/latest.npz
@@ -274,7 +359,11 @@ uv run kart-rl-viewer
 
 ## 現在の評価結果
 
-直近の500kステップ学習後の評価例:
+デフォルトLiDAR版は `uv run kart-rl-train` で学習し、`uv run kart-rl-eval` で `rollouts/latest_lidar.npz` を生成します。
+
+短時間の疎通確認用に512ステップだけ学習したLiDARモデルでは、まだ1周完了できず壁接触で終了します。LiDARのみ入力、直接ステア出力のため、実用的な挙動にはデフォルトの `total_timesteps: 500000` 以上の学習を前提にします。
+
+状態観測版を500kステップ学習した過去の評価例:
 
 ```text
 time_last 45.75s
@@ -284,4 +373,4 @@ stopped_count 0
 speed mean 8.15 m/s
 ```
 
-この結果は `rollouts/latest.npz` を `kart-rl-viewer` で確認できます。
+この状態観測版の結果は `uv run kart-rl-viewer --config configs/state.yaml` で確認できます。

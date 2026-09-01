@@ -115,14 +115,7 @@ class RacingKartEnv(gym.Env):
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
-        target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
-        speed_error = target_speed - self.state.speed
-        accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
-        speed_step = float(np.clip(speed_error, -accel_limit * self.dt, accel_limit * self.dt))
-        self.state.speed = float(np.clip(self.state.speed + speed_step, self.min_speed, self.max_speed))
-        base_steer = self._pure_pursuit_steer(self.prev_s)
-        steer_correction = float(action[1]) * self.max_steer * self.max_steer_correction_ratio
-        self.state.steer = float(np.clip(base_steer + steer_correction, -self.max_steer, self.max_steer))
+        self._apply_action(action)
         self.state.x += self.state.speed * np.cos(self.state.yaw) * self.dt
         self.state.y += self.state.speed * np.sin(self.state.yaw) * self.dt
         self.state.yaw = float(wrap_angle(self.state.yaw + self.state.speed / self.wheelbase * np.tan(self.state.steer) * self.dt))
@@ -171,6 +164,16 @@ class RacingKartEnv(gym.Env):
         self.prev_x = self.state.x
         self.prev_y = self.state.y
         return self._obs(proj), reward, terminated, truncated, self._info(proj, collision=collision)
+
+    def _apply_action(self, action: np.ndarray) -> None:
+        target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
+        speed_error = target_speed - self.state.speed
+        accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
+        speed_step = float(np.clip(speed_error, -accel_limit * self.dt, accel_limit * self.dt))
+        self.state.speed = float(np.clip(self.state.speed + speed_step, self.min_speed, self.max_speed))
+        base_steer = self._pure_pursuit_steer(self.prev_s)
+        steer_correction = float(action[1]) * self.max_steer * self.max_steer_correction_ratio
+        self.state.steer = float(np.clip(base_steer + steer_correction, -self.max_steer, self.max_steer))
 
     def _obs(self, proj) -> np.ndarray:
         obs = np.concatenate(

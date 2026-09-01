@@ -7,7 +7,7 @@ import numpy as np
 from stable_baselines3 import PPO, SAC
 
 from kart_rl.config import PACKAGE_ROOT, load_config, resolve_path
-from kart_rl.env import RacingKartEnv
+from kart_rl.env_factory import make_racing_env
 
 
 def load_model(config, env, model_path: Path):
@@ -25,7 +25,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
-    env = RacingKartEnv(config)
+    env = make_racing_env(config)
     default_model = config["viewer"].get("model_path") or (config["train"]["model_path"] + ".zip")
     model_path = resolve_path(args.model or default_model, config, must_exist=True)
     out_path = resolve_path(args.out or config["viewer"]["rollout_path"], config)

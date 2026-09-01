@@ -70,7 +70,7 @@ class Track:
         points = np.column_stack([data["x"], data["y"]])
         origin = points[0].copy()
         points = points - origin
-        lane_segments = _load_lane_segments(lane_csv_path, origin) if lane_csv_path else None
+        lane_segments = _load_lane_boundary_segments(lane_csv_path, origin) if lane_csv_path else None
         return cls(points=points, half_width_m=half_width_m, curvature_scale=curvature_scale, lane_segments=lane_segments)
 
     @classmethod
@@ -211,3 +211,24 @@ def _load_lane_segments(path: str | Path, origin: np.ndarray) -> np.ndarray:
     rows = data[np.isfinite(data[:, :4]).all(axis=1), :4]
     segments = rows.reshape(-1, 2, 2)
     return segments - origin
+
+
+def _load_lane_boundary_segments(path: str | Path, origin: np.ndarray) -> np.ndarray:
+    data = np.genfromtxt(path, delimiter=",")
+    if data.ndim != 2 or data.shape[1] < 4:
+        raise ValueError("lane CSV must have at least 4 columns: x1,y1,x2,y2")
+
+    segments = []
+    for cols in ((0, 1), (2, 3)):
+        points = data[:, cols]
+        points = points[np.isfinite(points).all(axis=1)] - origin
+        if len(points) < 2:
+            continue
+        step = np.linalg.norm(np.diff(points, axis=0), axis=1)
+        keep = np.concatenate([[True], step > 1e-6])
+        points = points[keep]
+        closed = np.vstack([points, points[0]])
+        segments.append(np.stack([closed[:-1], closed[1:]], axis=1))
+    if not segments:
+        return np.empty((0, 2, 2), dtype=np.float64)
+    return np.concatenate(segments, axis=0)
