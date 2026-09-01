@@ -21,11 +21,12 @@ exec $AWSIM_DIRECTORY/AWSIM.x86_64 \
     --start-random on \
     --ranking off \
     --camera cpu \
-    --lidar cpu \
+    --lidar on \
+    --lidar-backend gpu \
     --imu off \
     --gnss off \
     --v2x off
 
 # Cameraを使う場合 : --camera cpu or gpu
-# LiDARを使う場合 : --lidar cpu or gpu
+# LiDARを使う場合 : --lidar on/off, --lidar-backend cpu/gpu
 # GPUがない場合 -headlessを末尾に追加

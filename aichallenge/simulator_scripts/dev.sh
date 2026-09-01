@@ -22,8 +22,9 @@ exec $AWSIM_DIRECTORY/AWSIM.x86_64 \
     --wall-recovery off \
     --ranking off \
     --camera off \
-    --lidar gpu
+    --lidar on \
+    --lidar-backend gpu
 
 # Cameraを使う場合 : --camera cpu or gpu
-# LiDARを使う場合 : --lidar cpu or gpu
+# LiDARを使う場合 : --lidar on/off, --lidar-backend cpu/gpu
 # GPUがない場合 -headlessを末尾に追加

@@ -30,10 +30,10 @@ make eval → run_evaluation.bash → evaluation.launch.xml
 | スクリプト | 用途 | 引数 | 主な設定 |
 |---|---|---|---|
 | `eval.sh` | 評価 | - | 1台 / 6 laps / 600s / count開始 / handicap・wall-recovery・ranking off |
-| `dev.sh` | 開発 / S2R 練習 | 車両数 N（既定 1） | unlimited laps・timeout / count開始 / handicap・wall-recovery・ranking off / camera off・lidar gpu |
+| `dev.sh` | 開発 / S2R 練習 | 車両数 N（既定 1） | unlimited laps・timeout / count開始 / handicap・wall-recovery・ranking off / camera off・lidar on・lidar-backend gpu |
 | `parallel.sh` | 複数台レース | - | 3台 / 6 laps / 600s / sync開始 / handicap・ranking・start-random off / wall-recovery off |
-| `e2e.sh` | E2E 練習兼提出参考 | - | 1台 + NPC 2体 / 6 laps / timeout 実質なし / count開始（0秒） / start-random on / handicap・ranking off / camera・lidar cpu |
-| `e2e-final.sh` | E2E 決勝 | - | 4台 / 6 laps / 420s / sync開始 / handicap・ranking on / camera・lidar cpu / sound on |
+| `e2e.sh` | E2E 練習兼提出参考 | - | 1台 + NPC 2体 / 6 laps / timeout 実質なし / count開始（0秒） / start-random on / handicap・ranking off / camera cpu・lidar on・lidar-backend gpu |
+| `e2e-final.sh` | E2E 決勝 | - | 4台 / 6 laps / 420s / sync開始 / handicap・ranking on / camera cpu・lidar on・lidar-backend gpu / sound on |
 | `s2r-final.sh` | S2R 決勝 | - | 4台 / 6 laps / 420s / sync開始 / handicap・ranking on / camera・lidar off / sound on |
 | `gate.sh` | Safety Gate テスト | テスト番号 1/2/3/all（既定 all） | 1台。all は test1〜3 を順次実行 |
 | `sample-scenario.sh` | シナリオ指定起動 | - | `StreamingAssets/Race/official.yaml` を `--scenario` で読み込む |
@@ -45,7 +45,7 @@ make eval → run_evaluation.bash → evaluation.launch.xml
 - start-mode: `dev.sh` は count（全車接地後にカウントダウン開始、`/admin/awsim/start` 不要）。
   `eval.sh` / `parallel.sh` は sync（`/admin/awsim/start` 待ち。評価では awsim_state_manager が
   自動送信、手動で送るなら `make awsim-request-start`）。
-- センサー（camera/LiDAR）は dev では camera off・lidar gpu が既定（E2E 系 2 モードのみ cpu）。GPU 描画への切り替えは各ファイル末尾のコメント参照。
+- センサー（camera/LiDAR）は dev では camera off・lidar on・lidar-backend gpu、E2E 系 2 モードでは camera cpu・lidar on・lidar-backend gpu が既定。GPU 描画への切り替えは各ファイル末尾のコメント参照。
 - 引数の完全な仕様は AWSIM リポジトリの `internal-docs/specs/CLI.md`、
   または `AWSIM.x86_64 --help` を参照。
 
@@ -57,14 +57,14 @@ handicap / ranking / 車両数だけが変わる。
 | | E2E 系 | S2R 系 |
 |---|---|---|
 | 課題 | End-to-End（カメラ・LiDAR から直接制御） | Sim-to-Real（実車移行前提） |
-| camera / lidar | `cpu` | `off` |
+| camera / lidar | `camera cpu`, `lidar on`, `lidar-backend gpu` | `off` |
 | imu / gnss / v2x | `off`（明示指定） | 既定の `on`（指定しない） |
 | 練習 | `e2e.sh`（1台 + NPC 2体） | `dev.sh`（車両数は引数） |
 | 決勝 | `e2e-final.sh` | `s2r-final.sh` |
 
 - センサーの on/off がそのまま系統の定義。`--imu` / `--gnss` / `--v2x` は AWSIM 側の既定が
   `on` なので、E2E 系だけが明示的に `off` を書いている（S2R 系は書かないことで on）。
-- **S2R の練習には `dev.sh` をそのまま使う**（camera off・lidar gpu / handicap・ranking off /
+- **S2R の練習には `dev.sh` をそのまま使う**（camera off・lidar on・lidar-backend gpu / handicap・ranking off /
   laps・timeout 無制限）。専用モードを別に持つ必要がないため、S2R 系のスクリプトは決勝用のみ。
 - 練習は laps / timeout 無制限（`e2e.sh` は `--timeout 10000000.0`、`dev.sh` は
   加えて `--laps unlimited`）。周回や時間切れで止めずに走り続けられる。
