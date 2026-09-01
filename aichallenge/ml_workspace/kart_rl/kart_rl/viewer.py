@@ -32,6 +32,36 @@ def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size):
     pygame.draw.polygon(surface, (77, 65, 32), pts, width=2)
 
 
+def draw_lidar(surface, frame, ranges, angles, range_max, sample_ratio, vehicle_length, bounds, screen_size):
+    if ranges is None or angles is None or len(ranges) == 0:
+        return
+
+    yaw = float(frame[3])
+    origin = np.array(
+        [
+            frame[1] + 0.5 * vehicle_length * math.cos(yaw),
+            frame[2] + 0.5 * vehicle_length * math.sin(yaw),
+        ],
+        dtype=np.float32,
+    )
+    sample_ratio = float(np.clip(sample_ratio, 0.001, 1.0))
+    stride = max(1, int(round(1.0 / sample_ratio)))
+    ray_ranges = np.asarray(ranges[::stride], dtype=np.float32)
+    ray_angles = yaw + np.asarray(angles[::stride], dtype=np.float32)
+    endpoints = origin + np.column_stack([np.cos(ray_angles), np.sin(ray_angles)]) * ray_ranges[:, None]
+
+    origin_screen = world_to_screen(np.array([origin], dtype=np.float32), bounds, screen_size)[0].astype(int)
+    endpoint_screen = world_to_screen(endpoints.astype(np.float32), bounds, screen_size).astype(int)
+    overlay = pygame.Surface(screen_size, pygame.SRCALPHA)
+    for distance, endpoint in zip(ray_ranges, endpoint_screen):
+        color = (46, 160, 180, 34) if distance >= range_max * 0.999 else (17, 134, 157, 72)
+        pygame.draw.line(overlay, color, origin_screen, endpoint, width=1)
+        if distance < range_max * 0.999:
+            pygame.draw.circle(overlay, (10, 92, 112, 120), endpoint, 2)
+    pygame.draw.circle(overlay, (10, 92, 112, 180), origin_screen, 4)
+    surface.blit(overlay, (0, 0))
+
+
 def lane_edge_polylines(lane_segments: np.ndarray) -> list[np.ndarray]:
     if len(lane_segments) == 0:
         return []
@@ -70,6 +100,70 @@ def lane_edge_polylines_from_config(config: dict) -> list[np.ndarray]:
     return polylines
 
 
+def lidar_angles_from_config(config: dict) -> np.ndarray | None:
+    lidar_cfg = config.get("lidar")
+    if not lidar_cfg:
+        return None
+    angle_min = float(lidar_cfg["angle_min"])
+    angle_max = float(lidar_cfg["angle_max"])
+    angle_increment = float(lidar_cfg["angle_increment"])
+    return np.arange(angle_min, angle_max + 0.5 * angle_increment, angle_increment, dtype=np.float32)
+
+
+def scan_lidar_for_frame(
+    frame: np.ndarray,
+    lane_segments: np.ndarray,
+    angles: np.ndarray,
+    range_max: float,
+    vehicle_length: float,
+) -> np.ndarray:
+    yaw = float(frame[3])
+    origin = np.array(
+        [
+            frame[1] + 0.5 * vehicle_length * math.cos(yaw),
+            frame[2] + 0.5 * vehicle_length * math.sin(yaw),
+        ],
+        dtype=np.float64,
+    )
+    if len(lane_segments) == 0:
+        return np.full(len(angles), range_max, dtype=np.float32)
+
+    lane_p0 = lane_segments[:, 0, :]
+    lane_v = lane_segments[:, 1, :] - lane_segments[:, 0, :]
+    midpoint = lane_p0 + 0.5 * lane_v
+    seg_radius = 0.5 * np.linalg.norm(lane_v, axis=1)
+    nearby = np.linalg.norm(midpoint - origin, axis=1) <= range_max + seg_radius
+    lane_p0 = lane_p0[nearby]
+    lane_v = lane_v[nearby]
+    if len(lane_p0) == 0:
+        return np.full(len(angles), range_max, dtype=np.float32)
+
+    ray_angles = yaw + angles
+    rays = np.column_stack([np.cos(ray_angles), np.sin(ray_angles)])
+    rel = lane_p0 - origin
+    ranges = np.full(len(angles), range_max, dtype=np.float64)
+    for start in range(0, len(rays), 64):
+        ray_chunk = rays[start : start + 64]
+        hit = ray_segment_distances_batch(rel, ray_chunk, lane_v)
+        ranges[start : start + len(ray_chunk)] = np.minimum(ranges[start : start + len(ray_chunk)], hit)
+    return ranges.astype(np.float32)
+
+
+def ray_segment_distances_batch(rel: np.ndarray, rays: np.ndarray, seg_v: np.ndarray) -> np.ndarray:
+    denom = cross(rays[:, None, :], seg_v[None, :, :])
+    valid = np.abs(denom) > 1e-9
+    t = np.full_like(denom, np.inf, dtype=np.float64)
+    u = np.full_like(denom, np.inf, dtype=np.float64)
+    np.divide(cross(rel[None, :, :], seg_v[None, :, :]), denom, out=t, where=valid)
+    np.divide(cross(rel[None, :, :], rays[:, None, :]), denom, out=u, where=valid)
+    hit = valid & (t >= 0.0) & (u >= 0.0) & (u <= 1.0)
+    return np.clip(np.where(hit, t, np.inf).min(axis=1), 0.0, np.inf)
+
+
+def cross(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
@@ -87,6 +181,12 @@ def main() -> None:
     lane_edges = lane_edge_polylines_from_config(config) or lane_edge_polylines(lane_segments)
     vehicle_length = float(data["vehicle_length"])
     vehicle_width = float(data["vehicle_width"])
+    lidar_ranges = data["lidar_ranges"] if "lidar_ranges" in data else None
+    lidar_angles = data["lidar_angles"] if "lidar_angles" in data else lidar_angles_from_config(config)
+    lidar_range_max = float(data["lidar_range_max"]) if "lidar_range_max" in data else float(config.get("lidar", {}).get("range_max", 25.0))
+    lidar_sample_ratio = float(config.get("viewer", {}).get("lidar_sample_ratio", 0.5))
+    show_lidar = lidar_angles is not None
+    computed_lidar_cache: dict[int, np.ndarray] = {}
 
     pygame.init()
     screen_size = (1100, 800)
@@ -117,6 +217,8 @@ def main() -> None:
                     paused = not paused
                 elif event.key == pygame.K_r:
                     idx = 0
+                elif event.key == pygame.K_l:
+                    show_lidar = not show_lidar
                 elif event.key == pygame.K_RIGHT:
                     idx = min(idx + fps, len(frames) - 1)
                 elif event.key == pygame.K_LEFT:
@@ -134,10 +236,29 @@ def main() -> None:
             pygame.draw.lines(screen, (198, 58, 42), False, driven_line[: idx + 1], width=2)
 
         frame = frames[idx]
+        if show_lidar and lidar_angles is not None:
+            if lidar_ranges is not None:
+                current_lidar = lidar_ranges[idx]
+            else:
+                current_lidar = computed_lidar_cache.get(idx)
+                if current_lidar is None:
+                    current_lidar = scan_lidar_for_frame(frame, lane_segments, lidar_angles, lidar_range_max, vehicle_length)
+                    computed_lidar_cache[idx] = current_lidar
+            draw_lidar(
+                screen,
+                frame,
+                current_lidar,
+                lidar_angles,
+                lidar_range_max,
+                lidar_sample_ratio,
+                vehicle_length,
+                bounds,
+                screen_size,
+            )
         draw_vehicle(screen, frame[1:3], float(frame[3]), vehicle_length, vehicle_width, bounds, screen_size)
         text = f"t={frame[0]:6.2f}s  v={frame[4]:4.2f}m/s  progress={frame[7] * 100:5.1f}%  lateral={frame[8]:+.2f}m"
         screen.blit(font.render(text, True, (25, 29, 33)), (18, 16))
-        screen.blit(font.render("space: pause  left/right: seek  r: restart", True, (72, 76, 80)), (18, 42))
+        screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar", True, (72, 76, 80)), (18, 42))
         if idx == len(frames) - 1:
             screen.blit(font.render("rollout end", True, (170, 40, 40)), (18, 68))
 

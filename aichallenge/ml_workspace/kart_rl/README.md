@@ -79,8 +79,9 @@ uv run kart-rl-viewer --config configs/state.yaml
 - `space`: 一時停止
 - `left/right`: 1秒単位でシーク
 - `r`: 最初から再生
+- `l`: LiDAR表示のON/OFF
 
-赤線はモデルが実際に走った軌跡です。青線は学習で使う参照経路、灰色線は `configs/lane.csv` から復元したレーン境界線です。
+赤線はモデルが実際に走った軌跡です。青線は学習で使う参照経路、灰色線は `configs/lane.csv` から復元したレーン境界線です。青緑の放射線は車両先頭LiDARの現在スキャンです。LiDAR表示は `viewer.lidar_sample_ratio` で間引き率を設定でき、デフォルトは `0.5` です。
 
 ## 固定設定
 

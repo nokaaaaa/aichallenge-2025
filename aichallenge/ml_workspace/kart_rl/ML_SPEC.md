@@ -336,6 +336,16 @@ uv run kart-rl-eval
 | 11 | lateral_max | 局所境界の最大横位置 |
 | 12 | stopped | 停止終了フラグ |
 
+LiDAR版の評価ロールアウトには追加で以下を保存します。
+
+| 名前 | 内容 |
+|---|---|
+| lidar_ranges | 各フレームのLiDAR距離配列。単位はm |
+| lidar_angles | 各ビームの車両前方基準角度 |
+| lidar_range_max | 最大測距距離 |
+
+古いロールアウトなどで `lidar_ranges` がない場合、ビューアは保存済みの `lane_segments` と各フレームの車両姿勢からLiDARを再計算して表示します。
+
 ## ビューア
 
 起動コマンド:
@@ -349,13 +359,17 @@ uv run kart-rl-viewer
 - 青線: 学習で使う参照経路
 - 灰色線: `configs/lane.csv` から復元したレーン境界
 - 赤線: モデルが実際に走った軌跡
+- 青緑の放射線: 車両先頭LiDARの現在スキャン
 - 黄色い矩形: 車両
+
+LiDAR表示は `viewer.lidar_sample_ratio` で間引き率を指定します。デフォルトは `0.5` で、750本のビームを1本おきに表示します。この設定はviewer表示だけに使い、学習入力のLiDAR観測は750本のままです。
 
 操作:
 
 - `space`: 一時停止
 - `left/right`: 1秒単位でシーク
 - `r`: 最初から再生
+- `l`: LiDAR表示のON/OFF
 
 ## 現在の評価結果
 

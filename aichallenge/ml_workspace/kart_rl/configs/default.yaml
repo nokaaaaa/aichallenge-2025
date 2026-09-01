@@ -73,3 +73,4 @@ viewer:
   model_path: "models/ppo_kart_lidar.zip"
   rollout_path: "rollouts/latest_lidar.npz"
   fps: 50
+  lidar_sample_ratio: 0.5

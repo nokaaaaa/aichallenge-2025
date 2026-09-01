@@ -34,6 +34,7 @@ def main() -> None:
     model = load_model(config, env, model_path)
     obs, info = env.reset(seed=int(config.get("seed", 42)))
     frames = []
+    lidar_scans = []
     total_reward = 0.0
     terminated = truncated = False
     while not (terminated or truncated):
@@ -57,7 +58,17 @@ def main() -> None:
                 float(info["stopped"]),
             ]
         )
+        if config.get("env", {}).get("type") == "lidar":
+            lidar_scans.append(np.asarray(obs, dtype=np.float32))
 
+    save_data = {}
+    if lidar_scans:
+        lidar_cfg = config["lidar"]
+        save_data.update(
+            lidar_ranges=np.asarray(lidar_scans, dtype=np.float32) * float(lidar_cfg["range_max"]),
+            lidar_angles=env.angles.astype(np.float32),
+            lidar_range_max=np.float32(lidar_cfg["range_max"]),
+        )
     np.savez_compressed(
         out_path,
         frames=np.asarray(frames, dtype=np.float32),
@@ -75,6 +86,7 @@ def main() -> None:
         vehicle_length=np.float32(env.vehicle_length),
         vehicle_width=np.float32(env.vehicle_width),
         total_reward=np.float32(total_reward),
+        **save_data,
     )
     env.close()
     print(f"Saved rollout: {out_path}")
