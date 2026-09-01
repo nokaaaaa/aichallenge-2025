@@ -71,9 +71,8 @@ zenoh:
 	docker compose up -d zenoh
 
 dev: SIM_MODE := dev
-dev: export CONTROL_METHOD = tiny_lidar_net
 dev: simulator autoware-simulator
-	@echo "Start dev simulation (AWSIM + Autoware + lidar RL)"
+	@echo "Start dev simulation (AWSIM + Autoware; controller is selected by reference.launch.xml)"
 	@echo "To stop: make down  (docker compose down --remove-orphans)"
 
 dev2: SIM_MODE := dev2

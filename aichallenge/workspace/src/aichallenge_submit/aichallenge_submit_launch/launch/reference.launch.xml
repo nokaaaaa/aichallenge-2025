@@ -21,8 +21,8 @@
   <log message="echo launch param use_sim_time: $(var use_sim_time) launch_vehicle_interface: $(var launch_vehicle_interface) sensor_model: $(var sensor_model)"/>
 
   <!-- Control method -->
-  <arg name="control_method" default="tiny_lidar_net"
-      description="Select control: mpc, pure_pursuit, tiny_lidar_net, pilot_net, joycon, rl_train"/>
+  <arg name="control_method" default="lidar_rl"
+      description="Select control: mpc, pure_pursuit, tiny_lidar_net, lidar_rl, pilot_net, joycon, rl_train"/>
 
   <!-- Global parameters -->
   <group scoped="false">
@@ -153,6 +153,12 @@
 
   <group if="$(eval &quot;'$(var control_method)' == 'tiny_lidar_net'&quot;)">
     <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/tiny_lidar_net.launch.xml">
+      <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    </include>
+  </group>
+
+  <group if="$(eval &quot;'$(var control_method)' == 'lidar_rl'&quot;)">
+    <include file="$(find-pkg-share aichallenge_submit_launch)/launch/control/lidar_rl.launch.xml">
       <arg name="use_sim_time" value="$(var use_sim_time)"/>
     </include>
   </group>

@@ -4,7 +4,6 @@ mode="${1}"
 id="${2:-${ROS_DOMAIN_ID:-0}}"
 out_dir="${3:+${3}/d${id}}"
 out_dir="${out_dir:-/output/$(date +%Y%m%d-%H%M%S)/d${id}}"
-control_method="${CONTROL_METHOD:-}"
 
 case "${mode}" in
 "awsim")
@@ -39,9 +38,6 @@ mkdir -p "${ROS_LOG_DIR}"
 # set -m keeps bash from setting SIGINT to SIG_IGN on the backgrounded child (then the forwarded INT would be a no-op).
 set -m
 launch_args=("${opts[@]}" "domain_id:=$id")
-if [[ -n "${control_method}" ]]; then
-    launch_args+=("control_method:=${control_method}")
-fi
 ros2 launch aichallenge_system_launch aichallenge_system.launch.xml "${launch_args[@]}" &
 trap 'kill -INT $! 2>/dev/null' TERM INT
 while kill -0 $! 2>/dev/null; do wait; done
