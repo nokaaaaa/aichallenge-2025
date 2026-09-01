@@ -14,6 +14,9 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 
 
+SIM_ACCEL_LIMIT_MPS2 = 3.0
+
+
 class NumpyPpoPolicy:
     """Deterministic SB3 MlpPolicy actor exported by kart_rl.train."""
 
@@ -49,7 +52,7 @@ class TinyLidarNetNode(Node):
         self.declare_parameter("control.dt", 0.05)
         self.declare_parameter("vehicle.min_speed_mps", 0.0)
         self.declare_parameter("vehicle.max_speed_mps", 4.165)
-        self.declare_parameter("vehicle.max_accel_mps2", 3.2)
+        self.declare_parameter("vehicle.max_accel_mps2", SIM_ACCEL_LIMIT_MPS2)
         self.declare_parameter("vehicle.max_brake_mps2", 5.0)
         self.declare_parameter("vehicle.max_steer_rad", 0.75)
         self.declare_parameter("debug", False)
@@ -59,7 +62,7 @@ class TinyLidarNetNode(Node):
         self.control_dt = float(self.get_parameter("control.dt").value)
         self.min_speed = float(self.get_parameter("vehicle.min_speed_mps").value)
         self.max_speed = float(self.get_parameter("vehicle.max_speed_mps").value)
-        self.max_accel = float(self.get_parameter("vehicle.max_accel_mps2").value)
+        self.max_accel = min(float(self.get_parameter("vehicle.max_accel_mps2").value), SIM_ACCEL_LIMIT_MPS2)
         self.max_brake = float(self.get_parameter("vehicle.max_brake_mps2").value)
         self.max_steer = float(self.get_parameter("vehicle.max_steer_rad").value)
 
