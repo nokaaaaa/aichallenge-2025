@@ -6,7 +6,7 @@
   <arg name="control_cmd_topic" default="/control/command/control_cmd"/>
   <arg name="param_file" default="$(find-pkg-share lidar_rl_controller)/config/lidar_rl_node.param.yaml"/>
   <arg name="model_path" default="/aichallenge/ml_workspace/kart_rl/models/ppo_kart_lidar"/>
-  <!-- Example: use a specific trained model
+  <!-- 
   <arg name="model_path" default="/aichallenge/ml_workspace/kart_rl/models/ppo_kart_lidar_20260902-115134/ppo_kart_lidar_policy.npz"/>
   -->
 
