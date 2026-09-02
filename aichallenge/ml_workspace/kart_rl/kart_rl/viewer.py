@@ -19,7 +19,7 @@ def world_to_screen(points, bounds, screen_size, margin=48):
     return screen
 
 
-def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size, collision=False):
+def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size, collision=False, fill=(238, 183, 58)):
     center = world_to_screen(np.array([xy], dtype=np.float32), bounds, screen_size)[0]
     min_xy, max_xy = bounds
     scale = min((screen_size[0] - 96) / max(max_xy[0] - min_xy[0], 1.0), (screen_size[1] - 96) / max(max_xy[1] - min_xy[1], 1.0))
@@ -29,9 +29,24 @@ def draw_vehicle(surface, xy, yaw, length, width, bounds, screen_size, collision
     corners = np.array([[l / 2, w / 2], [l / 2, -w / 2], [-l / 2, -w / 2], [-l / 2, w / 2]])
     rot = np.array([[c, -s], [s, c]])
     pts = corners @ rot.T + center
-    pygame.draw.polygon(surface, (238, 183, 58), pts)
+    pygame.draw.polygon(surface, fill, pts)
     outline = (196, 36, 32) if collision else (77, 65, 32)
     pygame.draw.polygon(surface, outline, pts, width=3 if collision else 2)
+
+
+def vehicle_segments(vehicles: np.ndarray, length: float, width: float) -> np.ndarray:
+    if len(vehicles) == 0:
+        return np.empty((0, 2, 2), dtype=np.float64)
+    half_l = 0.5 * length
+    half_w = 0.5 * width
+    corners = np.array([[half_l, half_w], [half_l, -half_w], [-half_l, -half_w], [-half_l, half_w]], dtype=np.float64)
+    segments = []
+    for x, y, yaw in vehicles:
+        c, s = math.cos(float(yaw)), math.sin(float(yaw))
+        rot = np.array([[c, -s], [s, c]], dtype=np.float64)
+        polygon = corners @ rot.T + np.array([x, y], dtype=np.float64)
+        segments.append(np.stack([polygon, np.roll(polygon, -1, axis=0)], axis=1))
+    return np.concatenate(segments, axis=0)
 
 
 def termination_reason(frame, frames, config):
@@ -130,6 +145,7 @@ def lidar_angles_from_config(config: dict) -> np.ndarray | None:
 def scan_lidar_for_frame(
     frame: np.ndarray,
     lane_segments: np.ndarray,
+    obstacle_segments: np.ndarray,
     angles: np.ndarray,
     range_max: float,
     vehicle_length: float,
@@ -142,11 +158,15 @@ def scan_lidar_for_frame(
         ],
         dtype=np.float64,
     )
-    if len(lane_segments) == 0:
+    if len(lane_segments) == 0 and len(obstacle_segments) == 0:
         return np.full(len(angles), range_max, dtype=np.float32)
 
-    lane_p0 = lane_segments[:, 0, :]
-    lane_v = lane_segments[:, 1, :] - lane_segments[:, 0, :]
+    scan_segments = lane_segments
+    if len(obstacle_segments) > 0:
+        scan_segments = np.concatenate([scan_segments, obstacle_segments], axis=0) if len(scan_segments) else obstacle_segments
+
+    lane_p0 = scan_segments[:, 0, :]
+    lane_v = scan_segments[:, 1, :] - scan_segments[:, 0, :]
     midpoint = lane_p0 + 0.5 * lane_v
     seg_radius = 0.5 * np.linalg.norm(lane_v, axis=1)
     nearby = np.linalg.norm(midpoint - origin, axis=1) <= range_max + seg_radius
@@ -215,6 +235,8 @@ def main() -> None:
     lane_edges = lane_edge_polylines_from_config(config) or lane_edge_polylines(lane_segments)
     vehicle_length = float(data["vehicle_length"])
     vehicle_width = float(data["vehicle_width"])
+    obstacle_vehicles = data["obstacle_vehicles"] if "obstacle_vehicles" in data else np.empty((0, 3), dtype=np.float32)
+    obstacle_segments = vehicle_segments(obstacle_vehicles, vehicle_length, vehicle_width)
     lidar_ranges = data["lidar_ranges"] if "lidar_ranges" in data else None
     lidar_angles = data["lidar_angles"] if "lidar_angles" in data else lidar_angles_from_config(config)
     lidar_range_max = float(data["lidar_range_max"]) if "lidar_range_max" in data else float(config.get("lidar", {}).get("range_max", 25.0))
@@ -229,6 +251,8 @@ def main() -> None:
     font = pygame.font.SysFont("monospace", 18)
 
     bound_points = [track, frames[:, 1:3]]
+    if len(obstacle_vehicles):
+        bound_points.append(obstacle_vehicles[:, 0:2])
     if len(left_boundary) and len(right_boundary):
         bound_points.extend([left_boundary, right_boundary])
     bound_points.extend(lane_edges)
@@ -273,7 +297,14 @@ def main() -> None:
             else:
                 current_lidar = computed_lidar_cache.get(idx)
                 if current_lidar is None:
-                    current_lidar = scan_lidar_for_frame(frame, lane_segments, lidar_angles, lidar_range_max, vehicle_length)
+                    current_lidar = scan_lidar_for_frame(
+                        frame,
+                        lane_segments,
+                        obstacle_segments,
+                        lidar_angles,
+                        lidar_range_max,
+                        vehicle_length,
+                    )
                     computed_lidar_cache[idx] = current_lidar
             draw_lidar(
                 screen,
@@ -284,6 +315,17 @@ def main() -> None:
                 vehicle_length,
                 bounds,
                 screen_size,
+            )
+        for obstacle in obstacle_vehicles:
+            draw_vehicle(
+                screen,
+                obstacle[0:2],
+                float(obstacle[2]),
+                vehicle_length,
+                vehicle_width,
+                bounds,
+                screen_size,
+                fill=(80, 105, 130),
             )
         draw_vehicle(screen, frame[1:3], float(frame[3]), vehicle_length, vehicle_width, bounds, screen_size, collision=bool(frame[9]))
         text = f"t={frame[0]:6.2f}s  v={frame[4]:4.2f}m/s  progress={frame[7] * 100:5.1f}%  lateral={frame[8]:+.2f}m"

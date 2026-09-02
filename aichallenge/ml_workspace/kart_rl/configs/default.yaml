@@ -39,6 +39,11 @@ env:
   min_moving_speed_mps: 0.5
   max_stopped_steps: 120
   boundary_margin_m: 0.15
+  obstacle_vehicle_count: 10
+  obstacle_min_gap_m: 8.0
+  obstacle_start_clearance_m: 8.0
+  obstacle_lateral_margin_m: 0.25
+  obstacle_placement_attempts: 2000
   localization_delay_sec: 0.5
   steering_delay_sec: 0.2
   pure_pursuit_lookahead_base_m: 2.0

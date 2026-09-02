@@ -56,26 +56,10 @@ class LidarRacingKartEnv(RacingKartEnv):
         for p0, p1 in self.track.lane_segments[nearby]:
             if _segment_intersects_polygon(p0, p1, polygon):
                 return True
-        return False
+        return self._collides_with_obstacle()
 
     def _resolve_collision(self, proj):
         return proj
-
-    def _vehicle_polygon(self) -> np.ndarray:
-        c, s = np.cos(self.state.yaw), np.sin(self.state.yaw)
-        half_l = 0.5 * self.vehicle_length
-        half_w = 0.5 * self.vehicle_width
-        corners = np.array(
-            [
-                [half_l, half_w],
-                [half_l, -half_w],
-                [-half_l, -half_w],
-                [-half_l, half_w],
-            ],
-            dtype=np.float64,
-        )
-        rot = np.array([[c, -s], [s, c]], dtype=np.float64)
-        return corners @ rot.T + np.array([self.state.x, self.state.y], dtype=np.float64)
 
     def _scan(self) -> np.ndarray:
         sensor_x = self.state.x + 0.5 * self.vehicle_length * np.cos(self.state.yaw)
@@ -83,20 +67,27 @@ class LidarRacingKartEnv(RacingKartEnv):
         origin = np.array([sensor_x, sensor_y], dtype=np.float64)
         full_ranges = np.full(len(self.full_angles), self.range_max, dtype=np.float64)
 
-        midpoint = self.lane_p0 + 0.5 * self.lane_v
-        seg_radius = 0.5 * np.linalg.norm(self.lane_v, axis=1)
+        obstacle_segments = self._obstacle_segments()
+        p0 = self.lane_p0
+        v = self.lane_v
+        if len(obstacle_segments) > 0:
+            p0 = np.concatenate([p0, obstacle_segments[:, 0, :]], axis=0)
+            v = np.concatenate([v, obstacle_segments[:, 1, :] - obstacle_segments[:, 0, :]], axis=0)
+
+        midpoint = p0 + 0.5 * v
+        seg_radius = 0.5 * np.linalg.norm(v, axis=1)
         nearby = np.linalg.norm(midpoint - origin, axis=1) <= self.range_max + seg_radius
-        lane_p0 = self.lane_p0[nearby]
-        lane_v = self.lane_v[nearby]
-        if len(lane_p0) == 0:
+        scan_p0 = p0[nearby]
+        scan_v = v[nearby]
+        if len(scan_p0) == 0:
             return full_ranges[:: self.sample_stride].astype(np.float32)
 
         ray_angles = self.state.yaw + self.full_angles
         rays = np.column_stack([np.cos(ray_angles), np.sin(ray_angles)])
-        rel = lane_p0 - origin
+        rel = scan_p0 - origin
         for start in range(0, len(rays), self.ray_chunk_size):
             ray_chunk = rays[start : start + self.ray_chunk_size]
-            hit = _ray_segment_distances_batch(rel, ray_chunk, lane_v)
+            hit = _ray_segment_distances_batch(rel, ray_chunk, scan_v)
             full_ranges[start : start + len(ray_chunk)] = np.minimum(
                 full_ranges[start : start + len(ray_chunk)],
                 hit,

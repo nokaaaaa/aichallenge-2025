@@ -20,6 +20,14 @@ class VehicleState:
     steer: float
 
 
+@dataclass(frozen=True)
+class ObstacleVehicle:
+    s: float
+    x: float
+    y: float
+    yaw: float
+
+
 class RacingKartEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 50}
 
@@ -59,6 +67,11 @@ class RacingKartEnv(gym.Env):
         self.min_moving_speed = float(env_cfg.get("min_moving_speed_mps", 0.5))
         self.max_stopped_steps = int(env_cfg.get("max_stopped_steps", 80))
         self.boundary_margin = float(env_cfg.get("boundary_margin_m", 0.15))
+        self.obstacle_vehicle_count = int(env_cfg.get("obstacle_vehicle_count", 10))
+        self.obstacle_min_gap_m = float(env_cfg.get("obstacle_min_gap_m", 8.0))
+        self.obstacle_start_clearance_m = float(env_cfg.get("obstacle_start_clearance_m", 8.0))
+        self.obstacle_lateral_margin_m = float(env_cfg.get("obstacle_lateral_margin_m", 0.25))
+        self.obstacle_placement_attempts = int(env_cfg.get("obstacle_placement_attempts", 2000))
         self.localization_delay_sec = max(0.0, float(env_cfg.get("localization_delay_sec", 0.5)))
         self.steering_delay_sec = max(0.0, float(env_cfg.get("steering_delay_sec", 0.2)))
         self.lookahead_base = float(env_cfg.get("pure_pursuit_lookahead_base_m", 2.0))
@@ -100,6 +113,7 @@ class RacingKartEnv(gym.Env):
         self.localized_prev_s = 0.0
         self._state_history: deque[tuple[float, VehicleState]] = deque()
         self._steer_command_history: deque[tuple[float, float]] = deque()
+        self.obstacle_vehicles: list[ObstacleVehicle] = []
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
@@ -110,6 +124,7 @@ class RacingKartEnv(gym.Env):
         y += lateral * np.cos(yaw)
         yaw = float(wrap_angle(yaw + self.np_random.normal(0.0, self.start_noise_yaw)))
         self.state = VehicleState(x=x, y=y, yaw=yaw, speed=1.0, steer=0.0)
+        self.obstacle_vehicles = self._generate_obstacle_vehicles(start_s)
         proj = self.track.project(x, y, yaw)
         self.steps = 0
         self.progress_s = 0.0
@@ -173,9 +188,12 @@ class RacingKartEnv(gym.Env):
 
     def _is_collision(self, proj) -> bool:
         margin = self.boundary_margin
-        return proj.lateral_error < proj.lateral_min + margin or proj.lateral_error > proj.lateral_max - margin
+        wall_collision = proj.lateral_error < proj.lateral_min + margin or proj.lateral_error > proj.lateral_max - margin
+        return wall_collision or self._collides_with_obstacle()
 
     def _resolve_collision(self, proj):
+        if self._collides_with_obstacle():
+            return proj
         margin = self.boundary_margin
         clamped_lateral = float(np.clip(proj.lateral_error, proj.lateral_min + margin, proj.lateral_max - margin))
         normal = np.array([-np.sin(proj.yaw), np.cos(proj.yaw)])
@@ -198,6 +216,82 @@ class RacingKartEnv(gym.Env):
         base_steer = self._pure_pursuit_steer(self.localized_prev_s)
         steer_correction = float(action[1]) * self.max_steer * self.max_steer_correction_ratio
         self._set_commanded_steer(base_steer + steer_correction)
+
+    def _generate_obstacle_vehicles(self, start_s: float) -> list[ObstacleVehicle]:
+        if self.obstacle_vehicle_count <= 0:
+            return []
+
+        vehicles: list[ObstacleVehicle] = []
+        min_half_width = 0.5 * self.vehicle_width + self.boundary_margin + self.obstacle_lateral_margin_m
+        min_gap = max(self.obstacle_min_gap_m, self.vehicle_length * 2.0)
+        start_clearance = max(self.obstacle_start_clearance_m, min_gap)
+        for _ in range(self.obstacle_placement_attempts):
+            if len(vehicles) >= self.obstacle_vehicle_count:
+                break
+            s = float(self.np_random.uniform(0.0, self.track.length))
+            if self._track_gap(s, start_s) < start_clearance:
+                continue
+            if any(self._track_gap(s, vehicle.s) < min_gap for vehicle in vehicles):
+                continue
+
+            center_x, center_y, yaw, _ = self.track.sample_at(s)
+            proj = self.track.project(center_x, center_y, yaw)
+            lateral_min = proj.lateral_min + min_half_width
+            lateral_max = proj.lateral_max - min_half_width
+            if lateral_min > lateral_max:
+                continue
+
+            lateral = float(self.np_random.uniform(lateral_min, lateral_max))
+            normal = np.array([-np.sin(yaw), np.cos(yaw)])
+            x = float(center_x + normal[0] * lateral)
+            y = float(center_y + normal[1] * lateral)
+            candidate = ObstacleVehicle(s=s, x=x, y=y, yaw=float(yaw))
+            candidate_polygon = self._vehicle_polygon_at(candidate.x, candidate.y, candidate.yaw)
+            if any(
+                _polygons_intersect(candidate_polygon, self._vehicle_polygon_at(vehicle.x, vehicle.y, vehicle.yaw))
+                for vehicle in vehicles
+            ):
+                continue
+            vehicles.append(candidate)
+
+        if len(vehicles) != self.obstacle_vehicle_count:
+            raise RuntimeError(f"Could only place {len(vehicles)} obstacle vehicles out of {self.obstacle_vehicle_count}")
+        return vehicles
+
+    def _collides_with_obstacle(self) -> bool:
+        ego_polygon = self._vehicle_polygon()
+        return any(_polygons_intersect(ego_polygon, self._vehicle_polygon_at(vehicle.x, vehicle.y, vehicle.yaw)) for vehicle in self.obstacle_vehicles)
+
+    def _vehicle_polygon(self) -> np.ndarray:
+        return self._vehicle_polygon_at(self.state.x, self.state.y, self.state.yaw)
+
+    def _vehicle_polygon_at(self, x: float, y: float, yaw: float) -> np.ndarray:
+        c, s = np.cos(yaw), np.sin(yaw)
+        half_l = 0.5 * self.vehicle_length
+        half_w = 0.5 * self.vehicle_width
+        corners = np.array(
+            [
+                [half_l, half_w],
+                [half_l, -half_w],
+                [-half_l, -half_w],
+                [-half_l, half_w],
+            ],
+            dtype=np.float64,
+        )
+        rot = np.array([[c, -s], [s, c]], dtype=np.float64)
+        return corners @ rot.T + np.array([x, y], dtype=np.float64)
+
+    def _obstacle_segments(self) -> np.ndarray:
+        if not self.obstacle_vehicles:
+            return np.empty((0, 2, 2), dtype=np.float64)
+        segments = []
+        for vehicle in self.obstacle_vehicles:
+            polygon = self._vehicle_polygon_at(vehicle.x, vehicle.y, vehicle.yaw)
+            segments.append(np.stack([polygon, np.roll(polygon, -1, axis=0)], axis=1))
+        return np.concatenate(segments, axis=0)
+
+    def _track_gap(self, a: float, b: float) -> float:
+        return float(abs((a - b + 0.5 * self.track.length) % self.track.length - 0.5 * self.track.length))
 
     def _obs(self, proj) -> np.ndarray:
         obs = np.concatenate(
@@ -234,7 +328,10 @@ class RacingKartEnv(gym.Env):
         time_sec = self.steps * self.dt
         self.commanded_steer = float(np.clip(steer, -self.max_steer, self.max_steer))
         self._append_steer_command(time_sec, self.commanded_steer)
-        self.state.steer = self._delayed_steer(time_sec - self.steering_delay_sec)
+        target_steer = self._delayed_steer(time_sec - self.steering_delay_sec)
+        max_delta = self.max_steer_rate * self.dt
+        steer_delta = float(np.clip(target_steer - self.state.steer, -max_delta, max_delta))
+        self.state.steer = float(np.clip(self.state.steer + steer_delta, -self.max_steer, self.max_steer))
 
     def _append_steer_command(self, time_sec: float, steer: float) -> None:
         self._steer_command_history.append((time_sec, float(steer)))
@@ -355,3 +452,19 @@ class RacingKartEnv(gym.Env):
 
     def render(self):
         return None
+
+
+def _polygons_intersect(a: np.ndarray, b: np.ndarray) -> bool:
+    for polygon in (a, b):
+        for idx in range(len(polygon)):
+            edge = polygon[(idx + 1) % len(polygon)] - polygon[idx]
+            axis = np.array([-edge[1], edge[0]], dtype=np.float64)
+            norm = np.linalg.norm(axis)
+            if norm < 1e-9:
+                continue
+            axis /= norm
+            a_proj = a @ axis
+            b_proj = b @ axis
+            if a_proj.max() < b_proj.min() or b_proj.max() < a_proj.min():
+                return False
+    return True
