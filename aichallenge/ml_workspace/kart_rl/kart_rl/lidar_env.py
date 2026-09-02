@@ -63,6 +63,9 @@ class LidarRacingKartEnv(RacingKartEnv):
         self._set_commanded_steer(float(action[-1]) * self.max_steer)
 
     def _is_collision(self, proj) -> bool:
+        return self._is_wall_collision(proj) or self._collides_with_obstacle()
+
+    def _is_wall_collision(self, proj) -> bool:
         polygon = self._vehicle_polygon()
         midpoint = self.lane_p0 + 0.5 * self.lane_v
         radius = 0.5 * np.hypot(self.vehicle_length, self.vehicle_width)
@@ -70,7 +73,7 @@ class LidarRacingKartEnv(RacingKartEnv):
         for p0, p1 in self.track.lane_segments[nearby]:
             if _segment_intersects_polygon(p0, p1, polygon):
                 return True
-        return self._collides_with_obstacle()
+        return False
 
     def _resolve_collision(self, proj):
         return proj

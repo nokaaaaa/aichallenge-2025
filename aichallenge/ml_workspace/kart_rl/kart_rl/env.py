@@ -72,6 +72,7 @@ class RacingKartEnv(gym.Env):
         self.max_stopped_steps = int(env_cfg.get("max_stopped_steps", 80))
         self.boundary_margin = float(env_cfg.get("boundary_margin_m", 0.15))
         self.obstacle_vehicle_count = int(env_cfg.get("obstacle_vehicle_count", 10))
+        self.fixed_obstacles = list(env_cfg.get("fixed_obstacles") or [])
         self.obstacle_min_gap_m = float(env_cfg.get("obstacle_min_gap_m", 8.0))
         self.obstacle_start_clearance_m = float(env_cfg.get("obstacle_start_clearance_m", 8.0))
         self.obstacle_lateral_margin_m = float(env_cfg.get("obstacle_lateral_margin_m", 0.25))
@@ -214,7 +215,9 @@ class RacingKartEnv(gym.Env):
         self.lap_count = max(0, int(self.progress_s / self.track.length))
         self.stopped_steps = self.stopped_steps + 1 if self.state.speed < self.min_moving_speed else 0
 
-        collision = self._is_collision(proj)
+        obstacle_collision = self._collides_with_obstacle()
+        wall_collision = self._is_wall_collision(proj)
+        collision = obstacle_collision or wall_collision
         if collision:
             proj = self._resolve_collision(proj)
         self._append_state_history(self.steps * self.dt, self.state)
@@ -228,7 +231,17 @@ class RacingKartEnv(gym.Env):
         terminated = bool(collision or lap_finished or straight_finished or stopped)
         truncated = bool(self.steps >= self.max_episode_steps)
         distance_moved = float(np.hypot(self.state.x - self.prev_x, self.state.y - self.prev_y))
-        reward = self._reward(proj, progress, action, collision, self.episode_finished, stopped, distance_moved)
+        reward = self._reward(
+            proj,
+            progress,
+            action,
+            collision,
+            self.episode_finished,
+            stopped,
+            distance_moved,
+            wall_collision=wall_collision,
+            obstacle_collision=obstacle_collision,
+        )
         self.prev_action = action.copy()
         self.prev_x = self.state.x
         self.prev_y = self.state.y
@@ -239,9 +252,11 @@ class RacingKartEnv(gym.Env):
         )
 
     def _is_collision(self, proj) -> bool:
+        return self._is_wall_collision(proj) or self._collides_with_obstacle()
+
+    def _is_wall_collision(self, proj) -> bool:
         margin = self.boundary_margin
-        wall_collision = proj.lateral_error < proj.lateral_min + margin or proj.lateral_error > proj.lateral_max - margin
-        return wall_collision or self._collides_with_obstacle()
+        return bool(proj.lateral_error < proj.lateral_min + margin or proj.lateral_error > proj.lateral_max - margin)
 
     def _resolve_collision(self, proj):
         if self._collides_with_obstacle():
@@ -272,6 +287,8 @@ class RacingKartEnv(gym.Env):
     def _generate_obstacle_vehicles(self, start_s: float) -> list[ObstacleVehicle]:
         if self.obstacle_vehicle_count <= 0:
             return []
+        if self.fixed_obstacles:
+            return self._generate_fixed_obstacle_vehicles(start_s)
 
         vehicles: list[ObstacleVehicle] = []
         min_half_width = 0.5 * self.vehicle_width + self.boundary_margin + self.obstacle_lateral_margin_m
@@ -305,6 +322,39 @@ class RacingKartEnv(gym.Env):
 
         if len(vehicles) != self.obstacle_vehicle_count:
             raise RuntimeError(f"Could only place {len(vehicles)} obstacle vehicles out of {self.obstacle_vehicle_count}")
+        return vehicles
+
+    def _generate_fixed_obstacle_vehicles(self, start_s: float) -> list[ObstacleVehicle]:
+        if len(self.fixed_obstacles) < self.obstacle_vehicle_count:
+            raise RuntimeError(
+                f"fixed_obstacles has {len(self.fixed_obstacles)} entries, "
+                f"but obstacle_vehicle_count is {self.obstacle_vehicle_count}"
+            )
+
+        vehicles: list[ObstacleVehicle] = []
+        for idx, spec in enumerate(self.fixed_obstacles[: self.obstacle_vehicle_count]):
+            if "s_m" in spec:
+                s = float(spec["s_m"]) % self.track.length
+            elif "s_offset_m" in spec:
+                s = float(start_s + float(spec["s_offset_m"])) % self.track.length
+            else:
+                raise RuntimeError(f"fixed_obstacles[{idx}] must define s_m or s_offset_m")
+
+            lateral = float(spec.get("lateral_m", 0.0))
+            center_x, center_y, yaw, _ = self.track.sample_at(s)
+            normal = np.array([-np.sin(yaw), np.cos(yaw)])
+            x = float(center_x + normal[0] * lateral)
+            y = float(center_y + normal[1] * lateral)
+            vehicle = ObstacleVehicle(s=s, x=x, y=y, yaw=float(yaw), lateral=lateral)
+            polygon = self._vehicle_polygon_at(vehicle.x, vehicle.y, vehicle.yaw)
+            if self._intersects_lane_boundary(polygon):
+                raise RuntimeError(f"fixed_obstacles[{idx}] intersects lane boundary")
+            if any(
+                _polygons_intersect(polygon, self._vehicle_polygon_at(other.x, other.y, other.yaw))
+                for other in vehicles
+            ):
+                raise RuntimeError(f"fixed_obstacles[{idx}] intersects another obstacle")
+            vehicles.append(vehicle)
         return vehicles
 
     def _generate_obstacle_vehicles_in_ranges(
@@ -497,27 +547,44 @@ class RacingKartEnv(gym.Env):
                 nearest_delta = delta
         return nearest, nearest_delta
 
+    def _forward_obstacles(self, s: float, lookahead_m: float | None = None) -> list[tuple[ObstacleVehicle, float]]:
+        lookahead = self.obstacle_avoidance_lookahead_m if lookahead_m is None else lookahead_m
+        obstacles = []
+        for vehicle in self.obstacle_vehicles:
+            delta = float((vehicle.s - s) % self.track.length)
+            if 1e-6 < delta <= lookahead:
+                obstacles.append((vehicle, delta))
+        return sorted(obstacles, key=lambda item: item[1])
+
     def _obstacle_avoidance_penalty(self, proj) -> float:
-        obstacle, delta_s = self._nearest_forward_obstacle(proj.s)
-        if obstacle is None:
+        obstacles = self._forward_obstacles(proj.s)
+        if not obstacles:
             return 0.0
-        proximity = 1.0 - np.clip(delta_s / max(self.obstacle_avoidance_lookahead_m, 1e-6), 0.0, 1.0)
-        lateral_clearance = abs(proj.lateral_error - obstacle.lateral)
-        clearance_deficit = np.clip(
-            (self.obstacle_clearance_m - lateral_clearance) / max(self.obstacle_clearance_m, 1e-6),
-            0.0,
-            1.0,
-        )
-        return float((proximity * proximity) * clearance_deficit)
+
+        penalty = 0.0
+        for obstacle, delta_s in obstacles:
+            proximity = 1.0 - np.clip(delta_s / max(self.obstacle_avoidance_lookahead_m, 1e-6), 0.0, 1.0)
+            lateral_clearance = abs(proj.lateral_error - obstacle.lateral)
+            penalty += self._clearance_avoidance_penalty(
+                lateral_clearance,
+                self.obstacle_clearance_m,
+                proximity=proximity,
+            )
+        return float(np.clip(penalty, 0.0, 1.0))
 
     def _wall_avoidance_penalty(self, proj) -> float:
         wall_clearance = min(proj.lateral_error - proj.lateral_min, proj.lateral_max - proj.lateral_error)
+        return self._clearance_avoidance_penalty(wall_clearance, self.wall_clearance_m)
+
+    @staticmethod
+    def _clearance_avoidance_penalty(clearance: float, safe_clearance: float, proximity: float = 1.0) -> float:
         clearance_deficit = np.clip(
-            (self.wall_clearance_m - wall_clearance) / max(self.wall_clearance_m, 1e-6),
+            (safe_clearance - clearance) / max(safe_clearance, 1e-6),
             0.0,
             1.0,
         )
-        return float(clearance_deficit)
+        proximity = np.clip(proximity, 0.0, 1.0)
+        return float((proximity * proximity) * (clearance_deficit * clearance_deficit))
 
     def _hazard_avoidance_penalty(self, proj) -> float:
         return max(self._wall_avoidance_penalty(proj), self._obstacle_avoidance_penalty(proj))
@@ -644,6 +711,8 @@ class RacingKartEnv(gym.Env):
         finished: bool,
         stopped: bool,
         distance_moved: float,
+        wall_collision: bool | None = None,
+        obstacle_collision: bool | None = None,
     ) -> float:
         r = self.reward_cfg
         reward = r["progress"] * progress
@@ -661,8 +730,14 @@ class RacingKartEnv(gym.Env):
             reward -= r.get("low_speed", 0.0)
         hazard_avoidance_weight = r.get("hazard_avoidance", r.get("obstacle_avoidance", 0.0))
         reward -= hazard_avoidance_weight * self._hazard_avoidance_penalty(proj)
-        if collision:
+        if wall_collision is None:
+            wall_collision = collision
+        if obstacle_collision is None:
+            obstacle_collision = False
+        if wall_collision:
             reward -= r["wall_collision"]
+        if obstacle_collision:
+            reward -= r.get("obstacle_collision", r["wall_collision"])
         if stopped:
             reward -= r.get("stopped", 0.0)
         if finished:

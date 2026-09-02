@@ -16,12 +16,16 @@ ENV_RUNTIME_OVERRIDE_KEYS = (
     "random_start",
     "finish_on_start_straight_exit",
     "obstacle_vehicle_count",
+    "fixed_obstacles",
     "obstacle_min_gap_m",
     "obstacle_start_clearance_m",
     "obstacle_lateral_margin_m",
     "obstacle_start_straight_only",
     "obstacle_straight_curvature_threshold",
     "obstacle_straight_sample_step_m",
+    "obstacle_avoidance_lookahead_m",
+    "obstacle_clearance_m",
+    "wall_clearance_m",
     "obstacle_placement_attempts",
 )
 
