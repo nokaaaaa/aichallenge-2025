@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import math
+import re
+from pathlib import Path
 
 import numpy as np
 import pygame
@@ -208,25 +211,55 @@ def read_npz_string(data: np.lib.npyio.NpzFile, key: str, default: str) -> str:
     return str(value.item() if value.shape == () else value)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
-    parser.add_argument("--model", default=None)
-    parser.add_argument("--rollout", default=None)
-    parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
-    args = parser.parse_args()
+def display_model_name(model_path: Path | None, fallback: str = "unknown") -> str:
+    if model_path is None:
+        return fallback
+    parent = model_path.parent.name
+    return parent if parent != "models" else model_path.stem
 
-    config = load_config(args.config)
-    if args.rollout:
-        data = np.load(resolve_path(args.rollout, config, must_exist=True))
-        model_dir_name = read_npz_string(data, "model_dir_name", "unknown")
-    else:
-        model_setting = args.model or config["viewer"].get("model_path") or config["train"]["model_path"]
-        model_path = resolve_model_path(model_setting, config)
-        model_dir_name = model_path.parent.name
-        data, total_reward, info = collect_rollout_data(config, model_path, args.deterministic)
-        print(f"Loaded model: {model_path}")
-        print(f"reward={total_reward:.2f} time={info['time']:.2f}s laps={info['lap_count']} collision={info['collision']}")
+
+def load_config_for_model(model_path: Path, base_config: dict) -> dict:
+    config_path = model_path.parent / "config.yaml"
+    if not config_path.exists():
+        return copy.deepcopy(base_config)
+    model_config = load_config(config_path)
+    config = copy.deepcopy(model_config)
+    for key, value in base_config.items():
+        if key not in config:
+            config[key] = copy.deepcopy(value)
+    env_cfg = config.setdefault("env", {})
+    env_cfg.setdefault("obstacle_vehicle_count", 0)
+    env_cfg.setdefault("localization_delay_sec", 0.0)
+    env_cfg.setdefault("steering_delay_sec", 0.0)
+    # Saved training configs were copied from configs/default.yaml, so keep relative paths
+    # such as lane.csv anchored to the viewer's base config directory.
+    config["_config_path"] = base_config["_config_path"]
+    return config
+
+
+def discover_model_paths(config: dict, selected_model: Path | None) -> list[Path]:
+    model_setting = config["viewer"].get("model_path") or config["train"]["model_path"]
+    base = resolve_path(model_setting, config)
+    stem = base.with_suffix("") if base.suffix else base
+    model_dir = stem.parent
+    run_dir_pattern = re.compile(rf"^{re.escape(stem.name)}_\d{{8}}-\d{{6}}(?:_\d+)?$")
+    candidates: set[Path] = set()
+    if model_dir.exists():
+        for path in (model_dir / f"{stem.name}.zip", model_dir / f"{stem.name}_latest.zip"):
+            if path.exists():
+                candidates.add(path.resolve())
+        for run_dir in model_dir.iterdir():
+            if not run_dir.is_dir() or not run_dir_pattern.fullmatch(run_dir.name):
+                continue
+            path = run_dir / f"{stem.name}.zip"
+            if path.exists():
+                candidates.add(path.resolve())
+    if selected_model is not None:
+        candidates.add(selected_model.resolve())
+    return sorted(candidates, key=lambda path: (path.parent.name, path.name))
+
+
+def prepare_view_data(data: np.lib.npyio.NpzFile | dict, config: dict, screen_size: tuple[int, int]) -> dict:
     frames = data["frames"]
     track = data["track"]
     left_boundary = data["left_boundary"] if "left_boundary" in data else np.empty((0, 2), dtype=np.float32)
@@ -240,15 +273,8 @@ def main() -> None:
     lidar_ranges = data["lidar_ranges"] if "lidar_ranges" in data else None
     lidar_angles = data["lidar_angles"] if "lidar_angles" in data else lidar_angles_from_config(config)
     lidar_range_max = float(data["lidar_range_max"]) if "lidar_range_max" in data else float(config.get("lidar", {}).get("range_max", 25.0))
-    show_lidar = lidar_angles is not None
-    computed_lidar_cache: dict[int, np.ndarray] = {}
-
-    pygame.init()
-    screen_size = (1100, 800)
-    screen = pygame.display.set_mode(screen_size)
-    pygame.display.set_caption("Kart RL Viewer")
-    clock = pygame.time.Clock()
-    font = pygame.font.SysFont("monospace", 18)
+    if lidar_ranges is not None and lidar_angles is not None:
+        lidar_ranges = lidar_ranges[:, : len(lidar_angles)]
 
     bound_points = [track, frames[:, 1:3]]
     if len(obstacle_vehicles):
@@ -260,14 +286,163 @@ def main() -> None:
     bounds = (all_points.min(axis=0) - 4.0, all_points.max(axis=0) + 4.0)
     driven_line = world_to_screen(frames[:, 1:3], bounds, screen_size).astype(int)
 
+    return {
+        "frames": frames,
+        "track": track,
+        "lane_segments": lane_segments,
+        "lane_edges": lane_edges,
+        "vehicle_length": vehicle_length,
+        "vehicle_width": vehicle_width,
+        "obstacle_vehicles": obstacle_vehicles,
+        "obstacle_segments": obstacle_segments,
+        "lidar_ranges": lidar_ranges,
+        "lidar_angles": lidar_angles,
+        "lidar_range_max": lidar_range_max,
+        "bounds": bounds,
+        "driven_line": driven_line,
+        "computed_lidar_cache": {},
+    }
+
+
+def draw_button(surface, font, rect: pygame.Rect, label: str, enabled: bool = True) -> None:
+    bg = (248, 249, 246) if enabled else (214, 216, 212)
+    border = (86, 92, 94) if enabled else (150, 154, 151)
+    text_color = (25, 29, 33) if enabled else (112, 116, 112)
+    pygame.draw.rect(surface, bg, rect, border_radius=4)
+    pygame.draw.rect(surface, border, rect, width=1, border_radius=4)
+    text = font.render(label, True, text_color)
+    surface.blit(text, text.get_rect(center=rect.center))
+
+
+def env_summary(config: dict) -> str:
+    env_cfg = config.get("env", {})
+    obstacles = int(env_cfg.get("obstacle_vehicle_count", 0))
+    localization_delay = float(env_cfg.get("localization_delay_sec", 0.0))
+    steering_delay = float(env_cfg.get("steering_delay_sec", 0.0))
+    return f"env: obstacles={obstacles}  loc_delay={localization_delay:.2f}s  steer_delay={steering_delay:.2f}s"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--rollout", default=None)
+    parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    active_config = config
+    selected_model_path: Path | None = None
+    model_error: str | None = None
+    total_reward = 0.0
+    info = {"time": 0.0, "lap_count": 0, "collision": False}
+    model_paths: list[Path] = []
+    selected_model_index = -1
+    if args.rollout:
+        data = np.load(resolve_path(args.rollout, config, must_exist=True))
+        model_dir_name = read_npz_string(data, "model_dir_name", "unknown")
+    else:
+        model_setting = args.model or config["viewer"].get("model_path") or config["train"]["model_path"]
+        selected_model_path = resolve_model_path(model_setting, config)
+        model_paths = discover_model_paths(config, selected_model_path)
+        for index, path in enumerate(model_paths):
+            if path == selected_model_path.resolve():
+                selected_model_index = index
+                break
+        load_order = [selected_model_index]
+        load_order.extend(range(selected_model_index - 1, -1, -1))
+        load_order.extend(range(selected_model_index + 1, len(model_paths)))
+        data = None
+        errors = []
+        for index in load_order:
+            path = model_paths[index]
+            candidate_config = load_config_for_model(path, config)
+            try:
+                data, total_reward, info = collect_rollout_data(candidate_config, path, args.deterministic)
+            except Exception as exc:
+                errors.append(f"{display_model_name(path)}: {exc}")
+                print(f"Failed to load model: {path}: {exc}")
+                continue
+            active_config = candidate_config
+            selected_model_index = index
+            selected_model_path = path
+            model_dir_name = display_model_name(path)
+            print(f"Loaded model: {path}")
+            print(f"Loaded config: {path.parent / 'config.yaml' if (path.parent / 'config.yaml').exists() else args.config}")
+            print(f"reward={total_reward:.2f} time={info['time']:.2f}s laps={info['lap_count']} collision={info['collision']}")
+            break
+        if data is None:
+            raise RuntimeError("No loadable model found:\n" + "\n".join(errors))
+
+    pygame.init()
+    screen_size = (1100, 800)
+    screen = pygame.display.set_mode(screen_size)
+    pygame.display.set_caption("Kart RL Viewer")
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont("monospace", 18)
+    small_font = pygame.font.SysFont("monospace", 16)
+
+    view = prepare_view_data(data, active_config, screen_size)
+    show_lidar = view["lidar_angles"] is not None
+    if not model_paths:
+        model_paths = discover_model_paths(config, selected_model_path)
+    if selected_model_path is not None:
+        selected_resolved = selected_model_path.resolve()
+        for index, path in enumerate(model_paths):
+            if path == selected_resolved:
+                selected_model_index = index
+                break
+
+    def select_model(index: int) -> None:
+        nonlocal active_config, data, info, idx, model_dir_name, model_error, paused, selected_model_index, selected_model_path, show_lidar, total_reward, view
+        if not model_paths:
+            return
+        previous_config = active_config
+        previous_model_index = selected_model_index
+        previous_model_path = selected_model_path
+        previous_model_dir_name = model_dir_name
+        selected_model_index = index % len(model_paths)
+        selected_model_path = model_paths[selected_model_index]
+        model_dir_name = display_model_name(selected_model_path)
+        candidate_config = load_config_for_model(selected_model_path, config)
+        paused = True
+        model_error = None
+        screen.fill((236, 238, 232))
+        screen.blit(font.render(f"loading model: {model_dir_name}", True, (25, 29, 33)), (18, 16))
+        pygame.display.flip()
+        try:
+            data, total_reward, info = collect_rollout_data(candidate_config, selected_model_path, args.deterministic)
+            active_config = candidate_config
+            view = prepare_view_data(data, active_config, screen_size)
+            show_lidar = view["lidar_angles"] is not None
+            idx = 0
+            print(f"Loaded model: {selected_model_path}")
+            print(
+                f"Loaded config: {selected_model_path.parent / 'config.yaml' if (selected_model_path.parent / 'config.yaml').exists() else args.config}"
+            )
+            print(f"reward={total_reward:.2f} time={info['time']:.2f}s laps={info['lap_count']} collision={info['collision']}")
+        except Exception as exc:
+            active_config = previous_config
+            selected_model_index = previous_model_index
+            selected_model_path = previous_model_path
+            model_dir_name = previous_model_dir_name
+            model_error = str(exc)
+
     idx = 0
     paused = False
     running = True
     fps = int(config["viewer"].get("fps", 50))
+    prev_button = pygame.Rect(screen_size[0] - 196, 15, 42, 30)
+    next_button = pygame.Rect(screen_size[0] - 146, 15, 42, 30)
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if prev_button.collidepoint(event.pos) and model_paths:
+                    select_model(selected_model_index - 1)
+                elif next_button.collidepoint(event.pos) and model_paths:
+                    select_model(selected_model_index + 1)
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     paused = not paused
@@ -275,70 +450,82 @@ def main() -> None:
                     idx = 0
                 elif event.key == pygame.K_l:
                     show_lidar = not show_lidar
+                elif event.key == pygame.K_COMMA and model_paths:
+                    select_model(selected_model_index - 1)
+                elif event.key == pygame.K_PERIOD and model_paths:
+                    select_model(selected_model_index + 1)
                 elif event.key == pygame.K_RIGHT:
-                    idx = min(idx + fps, len(frames) - 1)
+                    idx = min(idx + fps, len(view["frames"]) - 1)
                 elif event.key == pygame.K_LEFT:
                     idx = max(idx - fps, 0)
 
         if not paused:
-            idx = min(idx + 1, len(frames) - 1)
+            idx = min(idx + 1, len(view["frames"]) - 1)
 
         screen.fill((236, 238, 232))
-        for edge in lane_edges:
-            pts = world_to_screen(edge, bounds, screen_size).astype(int)
+        for edge in view["lane_edges"]:
+            pts = world_to_screen(edge, view["bounds"], screen_size).astype(int)
             pygame.draw.lines(screen, (116, 120, 114), True, pts, width=1)
         if idx > 1:
-            pygame.draw.lines(screen, (198, 58, 42), False, driven_line[: idx + 1], width=2)
+            pygame.draw.lines(screen, (198, 58, 42), False, view["driven_line"][: idx + 1], width=2)
 
-        frame = frames[idx]
-        if show_lidar and lidar_angles is not None:
-            if lidar_ranges is not None:
-                current_lidar = lidar_ranges[idx]
+        frame = view["frames"][idx]
+        if show_lidar and view["lidar_angles"] is not None:
+            if view["lidar_ranges"] is not None:
+                current_lidar = view["lidar_ranges"][idx]
             else:
-                current_lidar = computed_lidar_cache.get(idx)
+                current_lidar = view["computed_lidar_cache"].get(idx)
                 if current_lidar is None:
                     current_lidar = scan_lidar_for_frame(
                         frame,
-                        lane_segments,
-                        obstacle_segments,
-                        lidar_angles,
-                        lidar_range_max,
-                        vehicle_length,
+                        view["lane_segments"],
+                        view["obstacle_segments"],
+                        view["lidar_angles"],
+                        view["lidar_range_max"],
+                        view["vehicle_length"],
                     )
-                    computed_lidar_cache[idx] = current_lidar
+                    view["computed_lidar_cache"][idx] = current_lidar
             draw_lidar(
                 screen,
                 frame,
                 current_lidar,
-                lidar_angles,
-                lidar_range_max,
-                vehicle_length,
-                bounds,
+                view["lidar_angles"],
+                view["lidar_range_max"],
+                view["vehicle_length"],
+                view["bounds"],
                 screen_size,
             )
-        for obstacle in obstacle_vehicles:
+        for obstacle in view["obstacle_vehicles"]:
             draw_vehicle(
                 screen,
                 obstacle[0:2],
                 float(obstacle[2]),
-                vehicle_length,
-                vehicle_width,
-                bounds,
+                view["vehicle_length"],
+                view["vehicle_width"],
+                view["bounds"],
                 screen_size,
                 fill=(80, 105, 130),
             )
-        draw_vehicle(screen, frame[1:3], float(frame[3]), vehicle_length, vehicle_width, bounds, screen_size, collision=bool(frame[9]))
+        draw_vehicle(screen, frame[1:3], float(frame[3]), view["vehicle_length"], view["vehicle_width"], view["bounds"], screen_size, collision=bool(frame[9]))
         text = f"t={frame[0]:6.2f}s  v={frame[4]:4.2f}m/s  progress={frame[7] * 100:5.1f}%  lateral={frame[8]:+.2f}m"
         screen.blit(font.render(text, True, (25, 29, 33)), (18, 16))
         screen.blit(font.render(f"model: {model_dir_name}", True, (25, 29, 33)), (18, 42))
-        screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar", True, (72, 76, 80)), (18, 68))
-        status_y = 94
+        screen.blit(font.render(env_summary(active_config), True, (25, 29, 33)), (18, 68))
+        screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar  </>: model", True, (72, 76, 80)), (18, 94))
+        draw_button(screen, small_font, prev_button, "<", bool(model_paths))
+        draw_button(screen, small_font, next_button, ">", bool(model_paths))
+        model_count = f"{selected_model_index + 1}/{len(model_paths)}" if selected_model_index >= 0 else f"-/{len(model_paths)}"
+        screen.blit(small_font.render(model_count, True, (25, 29, 33)), (screen_size[0] - 98, 21))
+        status_y = 120
+        if model_error:
+            screen.blit(font.render(f"model load error: {model_error[:88]}", True, (170, 40, 40)), (18, status_y))
+            status_y += 26
         if bool(frame[9]):
             screen.blit(font.render("collision", True, (170, 40, 40)), (18, status_y))
             status_y += 26
-        if idx == len(frames) - 1:
+        if idx == len(view["frames"]) - 1:
             screen.blit(
-                font.render(f"rollout end: {termination_reason(frame, frames, config)}", True, (170, 40, 40)),
+                font.render(f"rollout end: {termination_reason(frame, view['frames'], active_config)}", True, (170, 40, 40)),
                 (18, status_y),
             )
 

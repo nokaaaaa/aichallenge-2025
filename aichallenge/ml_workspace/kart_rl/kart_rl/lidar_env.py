@@ -24,11 +24,13 @@ class LidarRacingKartEnv(RacingKartEnv):
         self.range_min = float(lidar_cfg["range_min"])
         self.range_max = float(lidar_cfg["range_max"])
         self.ray_chunk_size = int(lidar_cfg.get("ray_chunk_size", 64))
+        self.include_vehicle_state = bool(lidar_cfg.get("include_vehicle_state", False))
         self.full_angles = np.arange(self.angle_min, self.angle_max + 0.5 * self.angle_increment, self.angle_increment)
         self.angles = self.full_angles[:: self.sample_stride]
+        observation_dim = len(self.angles) + (2 if self.include_vehicle_state else 0)
         self.observation_space = spaces.Box(
-            low=np.zeros(len(self.angles), dtype=np.float32),
-            high=np.ones(len(self.angles), dtype=np.float32),
+            low=np.zeros(observation_dim, dtype=np.float32),
+            high=np.ones(observation_dim, dtype=np.float32),
             dtype=np.float32,
         )
         if self.track.lane_segments is None or len(self.track.lane_segments) == 0:
@@ -37,8 +39,17 @@ class LidarRacingKartEnv(RacingKartEnv):
         self.lane_v = self.track.lane_segments[:, 1, :] - self.track.lane_segments[:, 0, :]
 
     def _obs(self, proj) -> np.ndarray:
-        ranges = self._scan()
-        return (ranges / self.range_max).astype(np.float32)
+        obs = (self._scan() / self.range_max).astype(np.float32)
+        if self.include_vehicle_state:
+            vehicle_state = np.array(
+                [
+                    np.clip(self.state.speed / max(self.max_speed, 1e-6), 0.0, 1.0),
+                    0.5 * (np.clip(self.state.steer / max(self.max_steer, 1e-6), -1.0, 1.0) + 1.0),
+                ],
+                dtype=np.float32,
+            )
+            obs = np.concatenate([obs, vehicle_state])
+        return obs
 
     def _apply_action(self, action: np.ndarray) -> None:
         target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
