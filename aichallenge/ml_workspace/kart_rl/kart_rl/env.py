@@ -546,6 +546,7 @@ class RacingKartEnv(gym.Env):
             "localized_heading_error": localized_proj.heading_error,
             "collision": collision,
             "stopped": self.stopped_steps >= self.max_stopped_steps,
+            "finished": self.lap_count >= self.finish_laps and not collision and self.stopped_steps < self.max_stopped_steps,
             "time": self.steps * self.dt,
         }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import numpy as np
 import yaml
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -62,6 +64,23 @@ def resolve_model_path(model_setting: str | Path, config: dict) -> Path:
     if Path(model_setting).suffix:
         return resolve_path(model_setting, config, must_exist=True)
     return resolve_latest_timestamped_artifact(model_setting, config, ".zip")
+
+
+class FinishRateCallback(BaseCallback):
+    def __init__(self, window_size: int = 100):
+        super().__init__()
+        self.finished_history: deque[bool] = deque(maxlen=window_size)
+
+    def _on_step(self) -> bool:
+        dones = self.locals.get("dones", [])
+        infos = self.locals.get("infos", [])
+        for done, info in zip(dones, infos):
+            if done:
+                self.finished_history.append(bool(info.get("finished", False)))
+        if self.finished_history:
+            self.logger.record("rollout/finish_rate_100", float(np.mean(self.finished_history)))
+            self.logger.record("rollout/finish_count_100", int(sum(self.finished_history)))
+        return True
 
 
 def export_ppo_policy_npz(model: PPO, model_path: Path) -> Path:
@@ -141,7 +160,12 @@ def main() -> None:
     timesteps = int(args.timesteps or train_cfg["total_timesteps"])
     try:
         try:
-            model.learn(total_timesteps=timesteps, progress_bar=True, reset_num_timesteps=resume_model_path is None)
+            model.learn(
+                total_timesteps=timesteps,
+                progress_bar=True,
+                reset_num_timesteps=resume_model_path is None,
+                callback=FinishRateCallback(),
+            )
         except KeyboardInterrupt:
             print("Training interrupted. Saving current model before exit...")
         save_training_artifacts(model, config, train_cfg)
