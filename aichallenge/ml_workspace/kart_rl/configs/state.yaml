@@ -23,16 +23,26 @@ env:
   action_dim: 1
   dt: 0.05
   max_episode_steps: 4000
+  start_pose_awsim:
+    x: 89633.29
+    y: 43127.57
+    orientation:
+      z: 0.8778
+      w: 0.4788
   start_noise_m: 0.1
   start_noise_yaw_rad: 0.03
+  finish_on_start_straight_exit: true
   finish_laps: 1
   min_moving_speed_mps: 0.5
   max_stopped_steps: 120
   boundary_margin_m: 0.15
-  obstacle_vehicle_count: 10
+  obstacle_vehicle_count: 3
   obstacle_min_gap_m: 8.0
   obstacle_start_clearance_m: 8.0
   obstacle_lateral_margin_m: 0.25
+  obstacle_start_straight_only: true
+  obstacle_straight_curvature_threshold: 0.035
+  obstacle_straight_sample_step_m: 0.5
   obstacle_placement_attempts: 2000
   localization_delay_sec: 0.5
   steering_delay_sec: 0.2

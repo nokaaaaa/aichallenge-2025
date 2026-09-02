@@ -63,8 +63,11 @@ class RacingKartEnv(gym.Env):
         self.dt = float(env_cfg["dt"])
         self.max_episode_steps = int(env_cfg["max_episode_steps"])
         self.finish_laps = int(env_cfg.get("finish_laps", 1))
+        self.finish_on_start_straight_exit = bool(env_cfg.get("finish_on_start_straight_exit", False))
         self.start_noise_m = float(env_cfg.get("start_noise_m", 0.0))
         self.start_noise_yaw = float(env_cfg.get("start_noise_yaw_rad", 0.0))
+        self.start_pose_awsim = env_cfg.get("start_pose_awsim")
+        self.start_s = self._resolve_start_s()
         self.min_moving_speed = float(env_cfg.get("min_moving_speed_mps", 0.5))
         self.max_stopped_steps = int(env_cfg.get("max_stopped_steps", 80))
         self.boundary_margin = float(env_cfg.get("boundary_margin_m", 0.15))
@@ -73,6 +76,9 @@ class RacingKartEnv(gym.Env):
         self.obstacle_start_clearance_m = float(env_cfg.get("obstacle_start_clearance_m", 8.0))
         self.obstacle_lateral_margin_m = float(env_cfg.get("obstacle_lateral_margin_m", 0.25))
         self.obstacle_placement_attempts = int(env_cfg.get("obstacle_placement_attempts", 2000))
+        self.obstacle_start_straight_only = bool(env_cfg.get("obstacle_start_straight_only", False))
+        self.obstacle_straight_curvature_threshold = float(env_cfg.get("obstacle_straight_curvature_threshold", 0.035))
+        self.obstacle_straight_sample_step_m = float(env_cfg.get("obstacle_straight_sample_step_m", 0.5))
         self.localization_delay_sec = max(0.0, float(env_cfg.get("localization_delay_sec", 0.5)))
         self.steering_delay_sec = max(0.0, float(env_cfg.get("steering_delay_sec", 0.2)))
         self.lookahead_base = float(env_cfg.get("pure_pursuit_lookahead_base_m", 2.0))
@@ -113,6 +119,9 @@ class RacingKartEnv(gym.Env):
         self.lap_count = 0
         self.prev_x = 0.0
         self.prev_y = 0.0
+        self.finish_progress_s = self.track.length * self.finish_laps
+        self.episode_finished = False
+        self.finish_reason = ""
         self.stopped_steps = 0
         self.commanded_steer = 0.0
         self.localized_state = VehicleState(0.0, 0.0, 0.0, 0.0, 0.0)
@@ -123,7 +132,11 @@ class RacingKartEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
-        start_s = float(self.np_random.uniform(0.0, self.track.length)) if options and options.get("random_start") else 0.0
+        start_s = (
+            float(self.np_random.uniform(0.0, self.track.length))
+            if options and options.get("random_start")
+            else self.start_s
+        )
         x, y, yaw, _ = self.track.sample_at(start_s)
         lateral = float(self.np_random.normal(0.0, self.start_noise_m))
         x -= lateral * np.sin(yaw)
@@ -131,6 +144,7 @@ class RacingKartEnv(gym.Env):
         yaw = float(wrap_angle(yaw + self.np_random.normal(0.0, self.start_noise_yaw)))
         self.state = VehicleState(x=x, y=y, yaw=yaw, speed=1.0, steer=0.0)
         self.obstacle_vehicles = self._generate_obstacle_vehicles(start_s)
+        self.finish_progress_s = self._finish_progress_for_start(start_s)
         proj = self.track.project(x, y, yaw)
         self.steps = 0
         self.progress_s = 0.0
@@ -139,6 +153,8 @@ class RacingKartEnv(gym.Env):
         self.lap_count = 0
         self.prev_x = self.state.x
         self.prev_y = self.state.y
+        self.episode_finished = False
+        self.finish_reason = ""
         self.stopped_steps = 0
         self.commanded_steer = 0.0
         self.localized_state = self._copy_state(self.state)
@@ -148,6 +164,28 @@ class RacingKartEnv(gym.Env):
         self._steer_command_history.clear()
         self._steer_command_history.append((0.0, self.commanded_steer))
         return self._obs(proj), self._info(proj, collision=False, localized_proj=proj)
+
+    def _resolve_start_s(self) -> float:
+        if not self.start_pose_awsim:
+            return float(self.config["env"].get("start_s_m", 0.0))
+
+        pose = self.start_pose_awsim
+        x = float(pose["x"]) - float(self.track.origin[0])
+        y = float(pose["y"]) - float(self.track.origin[1])
+        if "yaw_rad" in pose:
+            yaw = float(pose["yaw_rad"])
+        elif "orientation" in pose:
+            orientation = pose["orientation"]
+            yaw = 2.0 * np.arctan2(float(orientation["z"]), float(orientation["w"]))
+        else:
+            yaw = 0.0
+        return float(self.track.project(x, y, yaw).s)
+
+    def _finish_progress_for_start(self, start_s: float) -> float:
+        if not self.finish_on_start_straight_exit:
+            return self.track.length * self.finish_laps
+        _, straight_end_s = self._straight_section_around(start_s)
+        return max(straight_end_s - start_s, self.vehicle_length)
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
@@ -182,15 +220,23 @@ class RacingKartEnv(gym.Env):
         self._append_state_history(self.steps * self.dt, self.state)
         localized_proj = self._update_localized_state(self.steps * self.dt)
         lap_finished = self.lap_count >= self.finish_laps
+        straight_finished = self.progress_s >= self.finish_progress_s
         stopped = self.stopped_steps >= self.max_stopped_steps
-        terminated = bool(collision or lap_finished or stopped)
+        self.episode_finished = bool((lap_finished or straight_finished) and not collision and not stopped)
+        if self.episode_finished:
+            self.finish_reason = "straight complete" if straight_finished and not lap_finished else "lap complete"
+        terminated = bool(collision or lap_finished or straight_finished or stopped)
         truncated = bool(self.steps >= self.max_episode_steps)
         distance_moved = float(np.hypot(self.state.x - self.prev_x, self.state.y - self.prev_y))
-        reward = self._reward(proj, progress, action, collision, lap_finished, stopped, distance_moved)
+        reward = self._reward(proj, progress, action, collision, self.episode_finished, stopped, distance_moved)
         self.prev_action = action.copy()
         self.prev_x = self.state.x
         self.prev_y = self.state.y
-        return self._obs(localized_proj), reward, terminated, truncated, self._info(proj, collision=collision, localized_proj=localized_proj)
+        return self._obs(localized_proj), reward, terminated, truncated, self._info(
+            proj,
+            collision=collision,
+            localized_proj=localized_proj,
+        )
 
     def _is_collision(self, proj) -> bool:
         margin = self.boundary_margin
@@ -231,10 +277,14 @@ class RacingKartEnv(gym.Env):
         min_half_width = 0.5 * self.vehicle_width + self.boundary_margin + self.obstacle_lateral_margin_m
         min_gap = max(self.obstacle_min_gap_m, self.vehicle_length * 2.0)
         start_clearance = max(self.obstacle_start_clearance_m, min_gap)
+        s_ranges = self._obstacle_s_ranges(start_s) if self.obstacle_start_straight_only else None
+        if s_ranges is not None:
+            return self._generate_obstacle_vehicles_in_ranges(s_ranges, start_s, min_half_width, min_gap, start_clearance)
+
         for _ in range(self.obstacle_placement_attempts):
             if len(vehicles) >= self.obstacle_vehicle_count:
                 break
-            s = float(self.np_random.uniform(0.0, self.track.length))
+            s = self._sample_obstacle_s(None)
             if self._track_gap(s, start_s) < start_clearance:
                 continue
             if any(self._track_gap(s, vehicle.s) < min_gap for vehicle in vehicles):
@@ -256,6 +306,103 @@ class RacingKartEnv(gym.Env):
         if len(vehicles) != self.obstacle_vehicle_count:
             raise RuntimeError(f"Could only place {len(vehicles)} obstacle vehicles out of {self.obstacle_vehicle_count}")
         return vehicles
+
+    def _generate_obstacle_vehicles_in_ranges(
+        self,
+        s_ranges: list[tuple[float, float]],
+        start_s: float,
+        min_half_width: float,
+        min_gap: float,
+        start_clearance: float,
+    ) -> list[ObstacleVehicle]:
+        for _ in range(self.obstacle_placement_attempts):
+            vehicles: list[ObstacleVehicle] = []
+            for s in self._sample_obstacle_s_values(s_ranges, start_s, start_clearance, min_gap):
+                center_x, center_y, yaw, _ = self.track.sample_at(s)
+                proj = self.track.project(center_x, center_y, yaw)
+                lateral_min = proj.lateral_min + min_half_width
+                lateral_max = proj.lateral_max - min_half_width
+                if lateral_min > lateral_max:
+                    break
+
+                placement = self._place_obstacle_near_wall(s, center_x, center_y, yaw, lateral_min, lateral_max, vehicles)
+                if placement is None:
+                    break
+                candidate, _ = placement
+                vehicles.append(candidate)
+
+            if len(vehicles) == self.obstacle_vehicle_count:
+                return vehicles
+
+        raise RuntimeError(
+            f"Could only place obstacles in the start straight section after {self.obstacle_placement_attempts} attempts"
+        )
+
+    def _obstacle_s_ranges(self, start_s: float) -> list[tuple[float, float]]:
+        section_start, section_end = self._straight_section_around(start_s)
+        return [(section_start, section_end)]
+
+    def _straight_section_around(self, start_s: float) -> tuple[float, float]:
+        step = max(self.obstacle_straight_sample_step_m, 0.05)
+        threshold = max(self.obstacle_straight_curvature_threshold, 0.0)
+
+        backward = 0.0
+        while backward + step < self.track.length:
+            _, _, _, curvature = self.track.sample_at(start_s - backward - step)
+            if abs(curvature) > threshold:
+                break
+            backward += step
+
+        forward = 0.0
+        while forward + step < self.track.length - backward:
+            _, _, _, curvature = self.track.sample_at(start_s + forward + step)
+            if abs(curvature) > threshold:
+                break
+            forward += step
+
+        if backward + forward < self.obstacle_min_gap_m:
+            raise RuntimeError("Could not find a long enough straight section around the start position")
+        return start_s - backward, start_s + forward
+
+    def _sample_obstacle_s(self, s_ranges: list[tuple[float, float]] | None) -> float:
+        if not s_ranges:
+            return float(self.np_random.uniform(0.0, self.track.length))
+
+        lengths = np.array([max(end - start, 0.0) for start, end in s_ranges], dtype=np.float64)
+        total = float(lengths.sum())
+        if total <= 0.0:
+            raise RuntimeError("Obstacle placement range is empty")
+        selected = int(self.np_random.choice(len(s_ranges), p=lengths / total))
+        start, end = s_ranges[selected]
+        return float(self.np_random.uniform(start, end) % self.track.length)
+
+    def _sample_obstacle_s_values(
+        self,
+        s_ranges: list[tuple[float, float]],
+        start_s: float,
+        start_clearance: float,
+        min_gap: float,
+    ) -> list[float]:
+        intervals: list[tuple[float, float]] = []
+        for range_start, range_end in s_ranges:
+            intervals.extend(
+                [
+                    (range_start, min(range_end, start_s - start_clearance)),
+                    (max(range_start, start_s + start_clearance), range_end),
+                ]
+            )
+
+        intervals = [(start, end) for start, end in intervals if end - start >= 0.0]
+        self.np_random.shuffle(intervals)
+        count = self.obstacle_vehicle_count
+        for start, end in intervals:
+            free_length = end - start - min_gap * (count - 1)
+            if free_length < 0.0:
+                continue
+            offsets = np.sort(self.np_random.uniform(0.0, free_length, count))
+            return [float((start + offsets[idx] + idx * min_gap) % self.track.length) for idx in range(count)]
+
+        raise RuntimeError("Could not fit obstacle vehicles in the start straight section")
 
     def _place_obstacle_near_wall(
         self,
@@ -494,7 +641,7 @@ class RacingKartEnv(gym.Env):
         progress: float,
         action: np.ndarray,
         collision: bool,
-        lap_finished: bool,
+        finished: bool,
         stopped: bool,
         distance_moved: float,
     ) -> float:
@@ -518,7 +665,7 @@ class RacingKartEnv(gym.Env):
             reward -= r["wall_collision"]
         if stopped:
             reward -= r.get("stopped", 0.0)
-        if lap_finished:
+        if finished:
             reward += r["lap_complete"]
         return float(reward)
 
@@ -546,7 +693,9 @@ class RacingKartEnv(gym.Env):
             "localized_heading_error": localized_proj.heading_error,
             "collision": collision,
             "stopped": self.stopped_steps >= self.max_stopped_steps,
-            "finished": self.lap_count >= self.finish_laps and not collision and self.stopped_steps < self.max_stopped_steps,
+            "finished": self.episode_finished,
+            "finish_reason": self.finish_reason,
+            "finish_progress_s": self.finish_progress_s,
             "time": self.steps * self.dt,
         }
 

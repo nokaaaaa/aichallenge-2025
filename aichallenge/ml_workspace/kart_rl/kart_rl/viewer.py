@@ -57,6 +57,10 @@ def termination_reason(frame, frames, config):
         return "collision"
     if bool(frame[12]):
         return "stopped"
+    if len(frame) > 13 and bool(frame[13]):
+        if config.get("env", {}).get("finish_on_start_straight_exit", False):
+            return "straight complete"
+        return "lap complete"
     if frame[7] >= 0.999:
         return "lap complete"
     timeout_time = float(config["env"]["max_episode_steps"]) * float(config["env"]["dt"])

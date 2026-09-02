@@ -10,6 +10,20 @@ import yaml
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PACKAGE_ROOT.parents[2]
+ENV_RUNTIME_OVERRIDE_KEYS = (
+    "start_s_m",
+    "start_pose_awsim",
+    "random_start",
+    "finish_on_start_straight_exit",
+    "obstacle_vehicle_count",
+    "obstacle_min_gap_m",
+    "obstacle_start_clearance_m",
+    "obstacle_lateral_margin_m",
+    "obstacle_start_straight_only",
+    "obstacle_straight_curvature_threshold",
+    "obstacle_straight_sample_step_m",
+    "obstacle_placement_attempts",
+)
 
 
 def load_config(path: str | Path | None) -> dict[str, Any]:
@@ -39,6 +53,10 @@ def load_config_for_model(model_path: str | Path, base_config: dict[str, Any]) -
     env_cfg.setdefault("obstacle_vehicle_count", 0)
     env_cfg.setdefault("localization_delay_sec", 0.0)
     env_cfg.setdefault("steering_delay_sec", 0.0)
+    base_env_cfg = base_config.get("env", {})
+    for key in ENV_RUNTIME_OVERRIDE_KEYS:
+        if key in base_env_cfg:
+            env_cfg[key] = copy.deepcopy(base_env_cfg[key])
     # Saved training configs are copied from configs/default.yaml, so keep relative
     # paths such as lane.csv anchored to the caller's base config directory.
     config["_config_path"] = base_config["_config_path"]

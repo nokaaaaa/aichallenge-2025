@@ -22,7 +22,12 @@ from kart_rl.env_factory import make_racing_env
 def make_env(config, seed: int, rank: int):
     def _init():
         env = make_racing_env(config)
-        env.reset(seed=seed + rank, options={"random_start": True})
+        reset_options = (
+            {"random_start": True}
+            if config.get("env", {}).get("random_start", False)
+            else None
+        )
+        env.reset(seed=seed + rank, options=reset_options)
         return Monitor(env)
 
     return _init

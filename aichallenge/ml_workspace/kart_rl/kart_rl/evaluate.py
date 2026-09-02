@@ -57,6 +57,7 @@ def collect_rollout_data(
                     info["lateral_min"],
                     info["lateral_max"],
                     float(info["stopped"]),
+                    float(info["finished"]),
                 ]
             )
             if config.get("env", {}).get("type") == "lidar":

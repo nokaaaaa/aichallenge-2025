@@ -32,6 +32,7 @@ class Track:
         left_boundary: np.ndarray | None = None,
         right_boundary: np.ndarray | None = None,
         lane_segments: np.ndarray | None = None,
+        origin: np.ndarray | None = None,
     ):
         if len(points) < 3:
             raise ValueError("Track requires at least 3 points")
@@ -39,6 +40,7 @@ class Track:
         self.left_boundary = left_boundary.astype(np.float64) if left_boundary is not None else None
         self.right_boundary = right_boundary.astype(np.float64) if right_boundary is not None else None
         self.lane_segments = lane_segments.astype(np.float64) if lane_segments is not None else None
+        self.origin = origin.astype(np.float64) if origin is not None else np.zeros(2, dtype=np.float64)
         self.half_width_m = float(half_width_m)
         self.curvature_scale = float(curvature_scale)
 
@@ -71,7 +73,13 @@ class Track:
         origin = points[0].copy()
         points = points - origin
         lane_segments = _load_lane_boundary_segments(lane_csv_path, origin) if lane_csv_path else None
-        return cls(points=points, half_width_m=half_width_m, curvature_scale=curvature_scale, lane_segments=lane_segments)
+        return cls(
+            points=points,
+            half_width_m=half_width_m,
+            curvature_scale=curvature_scale,
+            lane_segments=lane_segments,
+            origin=origin,
+        )
 
     @classmethod
     def from_lane_csv(cls, path: str | Path, half_width_m: float | str, curvature_scale: float = 12.0) -> "Track":
@@ -102,6 +110,7 @@ class Track:
             curvature_scale=curvature_scale,
             left_boundary=left - origin,
             right_boundary=right - origin,
+            origin=origin,
         )
 
     def _compute_curvatures(self) -> np.ndarray:
