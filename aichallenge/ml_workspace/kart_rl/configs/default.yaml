@@ -31,6 +31,7 @@ vehicle:
 
 env:
   type: "lidar"
+  action_dim: 1
   dt: 0.05
   max_episode_steps: 4000
   start_noise_m: 0.1

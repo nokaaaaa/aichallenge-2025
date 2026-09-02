@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from stable_baselines3 import PPO, SAC
 
-from kart_rl.config import PACKAGE_ROOT, load_config, resolve_latest_timestamped_artifact, resolve_path
+from kart_rl.config import PACKAGE_ROOT, load_config, load_config_for_model, resolve_latest_timestamped_artifact, resolve_path
 from kart_rl.env_factory import make_racing_env
 
 
@@ -112,6 +112,7 @@ def main() -> None:
     config = load_config(args.config)
     model_setting = args.model or config["viewer"].get("model_path") or config["train"]["model_path"]
     model_path = resolve_model_path(model_setting, config)
+    config = load_config_for_model(model_path, config)
     out_path = resolve_path(args.out or config["viewer"]["rollout_path"], config)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 

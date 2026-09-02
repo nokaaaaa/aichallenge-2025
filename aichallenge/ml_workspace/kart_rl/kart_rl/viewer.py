@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import math
 import re
 from pathlib import Path
@@ -9,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pygame
 
-from kart_rl.config import PACKAGE_ROOT, load_config, resolve_path
+from kart_rl.config import PACKAGE_ROOT, load_config, load_config_for_model, resolve_path
 from kart_rl.evaluate import collect_rollout_data, resolve_model_path
 
 
@@ -218,25 +217,6 @@ def display_model_name(model_path: Path | None, fallback: str = "unknown") -> st
     return parent if parent != "models" else model_path.stem
 
 
-def load_config_for_model(model_path: Path, base_config: dict) -> dict:
-    config_path = model_path.parent / "config.yaml"
-    if not config_path.exists():
-        return copy.deepcopy(base_config)
-    model_config = load_config(config_path)
-    config = copy.deepcopy(model_config)
-    for key, value in base_config.items():
-        if key not in config:
-            config[key] = copy.deepcopy(value)
-    env_cfg = config.setdefault("env", {})
-    env_cfg.setdefault("obstacle_vehicle_count", 0)
-    env_cfg.setdefault("localization_delay_sec", 0.0)
-    env_cfg.setdefault("steering_delay_sec", 0.0)
-    # Saved training configs were copied from configs/default.yaml, so keep relative paths
-    # such as lane.csv anchored to the viewer's base config directory.
-    config["_config_path"] = base_config["_config_path"]
-    return config
-
-
 def discover_model_paths(config: dict, selected_model: Path | None) -> list[Path]:
     model_setting = config["viewer"].get("model_path") or config["train"]["model_path"]
     base = resolve_path(model_setting, config)
@@ -316,10 +296,16 @@ def draw_button(surface, font, rect: pygame.Rect, label: str, enabled: bool = Tr
 
 def env_summary(config: dict) -> str:
     env_cfg = config.get("env", {})
+    vehicle_cfg = config.get("vehicle", {})
+    action_dim = int(env_cfg.get("action_dim", 1))
     obstacles = int(env_cfg.get("obstacle_vehicle_count", 0))
     localization_delay = float(env_cfg.get("localization_delay_sec", 0.0))
     steering_delay = float(env_cfg.get("steering_delay_sec", 0.0))
-    return f"env: obstacles={obstacles}  loc_delay={localization_delay:.2f}s  steer_delay={steering_delay:.2f}s"
+    max_speed = float(vehicle_cfg.get("max_speed_mps", 0.0))
+    return (
+        f"env: action={action_dim}  target_v={max_speed:.2f}m/s  "
+        f"obstacles={obstacles}  loc_delay={localization_delay:.2f}s  steer_delay={steering_delay:.2f}s"
+    )
 
 
 def main() -> None:

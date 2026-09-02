@@ -112,14 +112,13 @@ Gymnasiumの観測空間は `Box(-1, 1, shape=(8,), dtype=float32)` です。
 
 ## 行動
 
-デフォルトのLiDAR版では、行動は直接車両制御です。
+デフォルトのLiDAR版では、行動はステア角のみです。速度は `vehicle.max_speed_mps` を目標速度として固定します。
 
 | Index | 名前 | 内容 |
 |---:|---|---|
-| 0 | target_speed_ratio | 目標速度 |
-| 1 | steer_ratio | ステア角 |
+| 0 | steer_ratio | ステア角 |
 
-`action[1]` は `[-1, 1]` から `[-max_steer_rad, max_steer_rad]` に変換します。状態観測版のようなpure pursuit補助は使いません。
+`action[0]` は `[-1, 1]` から `[-max_steer_rad, max_steer_rad]` に変換します。状態観測版のようなpure pursuit補助は使いません。
 
 デフォルトLiDAR版の出力先:
 
@@ -139,19 +138,18 @@ uv run kart-rl-viewer
 
 ### 状態観測版の行動
 
-状態観測版の行動空間も `Box(-1, 1, shape=(2,), dtype=float32)` です。
+状態観測版の行動空間もデフォルトは `Box(-1, 1, shape=(1,), dtype=float32)` です。
 
 | Index | 名前 | 内容 |
 |---:|---|---|
-| 0 | target_speed_ratio | 目標速度 |
-| 1 | steer_correction_ratio | pure pursuitステアへの補正 |
+| 0 | steer_correction_ratio | pure pursuitステアへの補正 |
 
 ### 目標速度
 
-`action[0]` は `[-1, 1]` から `[min_speed_mps, max_speed_mps]` に線形変換されます。
+目標速度は action からは決めず、常に `max_speed_mps` です。
 
 ```text
-target_speed = min_speed + 0.5 * (action[0] + 1) * (max_speed - min_speed)
+target_speed = max_speed
 ```
 
 現在速度から目標速度へ、加速度上限またはブレーキ上限の範囲内で近づけます。
@@ -161,7 +159,7 @@ target_speed = min_speed + 0.5 * (action[0] + 1) * (max_speed - min_speed)
 LiDAR版のステアはRL出力をそのまま目標ステア角に変換します。
 
 ```text
-steer_target = action[1] * max_steer
+steer_target = action[-1] * max_steer
 ```
 
 実際のステア角は `max_steer_rate_radps` の範囲内で `steer_target` に近づけます。
@@ -171,10 +169,12 @@ steer_target = action[1] * max_steer
 状態観測版のステアはpure pursuitをベースにし、RLは微小補正だけを学びます。
 
 ```text
-steer = pure_pursuit_steer + action[1] * max_steer * max_steer_correction_ratio
+steer = pure_pursuit_steer + action[-1] * max_steer * max_steer_correction_ratio
 ```
 
-現在設定では `max_steer_correction_ratio: 0.10` なので、RLが補正できる範囲は最大ステア角の10%です。これにより、低レベル操舵をゼロから探索するよりも「壁に当たらず速く走る速度選択」に学習を寄せています。
+現在設定では `max_steer_correction_ratio: 0.10` なので、RLが補正できる範囲は最大ステア角の10%です。
+
+既存の保存済みモデルには、古い `Box(-1, 1, shape=(2,), dtype=float32)` の action space で学習したものがあります。その場合も速度側の出力は無視し、最後の action 要素をステアとして使います。
 
 ## 報酬関数
 

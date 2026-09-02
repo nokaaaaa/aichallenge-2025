@@ -90,12 +90,12 @@ class RacingKartEnv(gym.Env):
         self.lookahead = (2.0, 5.0, 10.0, 18.0)
         self.projection_window_m = max(20.0, self.max_speed * self.dt * 10.0)
 
-        # action = [target_speed_ratio, steer_correction_ratio]
-        # target_speed_ratio: -1..1 maps to min_speed..max_speed
-        # steer_correction_ratio adjusts the pure-pursuit steering baseline.
+        # action = [steer_correction_ratio] for new models. Older saved models may
+        # still output [target_speed_ratio, steer_correction_ratio]; speed is fixed.
+        self.action_dim = int(env_cfg.get("action_dim", 2))
         self.action_space = spaces.Box(
-            low=np.array([-1.0, -1.0], dtype=np.float32),
-            high=np.array([1.0, 1.0], dtype=np.float32),
+            low=-np.ones(self.action_dim, dtype=np.float32),
+            high=np.ones(self.action_dim, dtype=np.float32),
             dtype=np.float32,
         )
         self.observation_space = spaces.Box(low=-np.ones(8, dtype=np.float32), high=np.ones(8, dtype=np.float32))
@@ -103,7 +103,7 @@ class RacingKartEnv(gym.Env):
         self.steps = 0
         self.progress_s = 0.0
         self.prev_s = 0.0
-        self.prev_action = np.zeros(2, dtype=np.float32)
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.lap_count = 0
         self.prev_x = 0.0
         self.prev_y = 0.0
@@ -129,7 +129,7 @@ class RacingKartEnv(gym.Env):
         self.steps = 0
         self.progress_s = 0.0
         self.prev_s = proj.s
-        self.prev_action = np.zeros(2, dtype=np.float32)
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
         self.lap_count = 0
         self.prev_x = self.state.x
         self.prev_y = self.state.y
@@ -208,13 +208,13 @@ class RacingKartEnv(gym.Env):
         )
 
     def _apply_action(self, action: np.ndarray) -> None:
-        target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
+        target_speed = self.max_speed
         speed_error = target_speed - self.state.speed
         accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
         speed_step = float(np.clip(speed_error, -accel_limit * self.dt, accel_limit * self.dt))
         self.state.speed = float(np.clip(self.state.speed + speed_step, self.min_speed, self.max_speed))
         base_steer = self._pure_pursuit_steer(self.localized_prev_s)
-        steer_correction = float(action[1]) * self.max_steer * self.max_steer_correction_ratio
+        steer_correction = float(action[-1]) * self.max_steer * self.max_steer_correction_ratio
         self._set_commanded_steer(base_steer + steer_correction)
 
     def _generate_obstacle_vehicles(self, start_s: float) -> list[ObstacleVehicle]:

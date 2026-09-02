@@ -112,6 +112,7 @@ class LidarRlControllerNode(Node):
         self.policy = NumpyPpoPolicy(model_path)
         self.input_dim = self.policy.input_dim
         self.current_speed = 0.0
+        self.current_steer = 0.0
         self.inference_times: list[float] = []
         self.last_log_time = self.get_clock().now()
 
@@ -144,20 +145,36 @@ class LidarRlControllerNode(Node):
         ranges = np.asarray(msg.ranges, dtype=np.float32)
         ranges = np.nan_to_num(ranges, nan=self.range_max, posinf=self.range_max, neginf=self.range_max)
         ranges = np.clip(ranges, self.range_min, self.range_max)
-        if len(ranges) != self.input_dim:
-            idx = np.linspace(0, max(len(ranges) - 1, 0), self.input_dim, dtype=int)
-            ranges = ranges[idx] if len(ranges) else np.full(self.input_dim, self.range_max, dtype=np.float32)
+        has_vehicle_state = (
+            self.input_dim > 2
+            and len(ranges) != self.input_dim
+            and (len(ranges) == self.input_dim - 2 or len(ranges) % (self.input_dim - 2) == 0)
+        )
+        lidar_dim = self.input_dim - 2 if has_vehicle_state else self.input_dim
+        if len(ranges) != lidar_dim:
+            idx = np.linspace(0, max(len(ranges) - 1, 0), lidar_dim, dtype=int)
+            ranges = ranges[idx] if len(ranges) else np.full(lidar_dim, self.range_max, dtype=np.float32)
         obs = ranges / self.range_max
+        if has_vehicle_state:
+            vehicle_state = np.array(
+                [
+                    np.clip(self.current_speed / max(self.max_speed, 1e-6), 0.0, 1.0),
+                    0.5 * (np.clip(self.current_steer / max(self.max_steer, 1e-6), -1.0, 1.0) + 1.0),
+                ],
+                dtype=np.float32,
+            )
+            obs = np.concatenate([obs, vehicle_state])
         action = self.policy.predict(obs).reshape(-1)
-        if action.size < 2:
-            self.get_logger().warn("PPO policy returned fewer than 2 actions; skipping command publication.")
+        if action.size < 1:
+            self.get_logger().warn("PPO policy returned no actions; skipping command publication.")
             return
 
-        target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
+        target_speed = self.max_speed
         speed_error = target_speed - self.current_speed
         accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
         accel = float(np.clip(speed_error / max(self.control_dt, 1e-3), -accel_limit, accel_limit))
-        steer = float(np.clip(float(action[1]) * self.max_steer, -self.max_steer, self.max_steer))
+        steer = float(np.clip(float(action[-1]) * self.max_steer, -self.max_steer, self.max_steer))
+        self.current_steer = steer
 
         cmd = AckermannControlCommand()
         cmd.stamp = self.get_clock().now().to_msg()

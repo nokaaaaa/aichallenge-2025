@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,29 @@ def load_config(path: str | Path | None) -> dict[str, Any]:
         cfg = yaml.safe_load(f)
     cfg["_config_path"] = str(config_path)
     return cfg
+
+
+def load_config_for_model(model_path: str | Path, base_config: dict[str, Any]) -> dict[str, Any]:
+    model_path = Path(model_path)
+    config_path = model_path.parent / "config.yaml"
+    if not config_path.exists():
+        config = copy.deepcopy(base_config)
+        config.setdefault("env", {})["action_dim"] = 2
+        return config
+
+    config = load_config(config_path)
+    for key, value in base_config.items():
+        if key not in config:
+            config[key] = copy.deepcopy(value)
+    env_cfg = config.setdefault("env", {})
+    env_cfg.setdefault("action_dim", 2)
+    env_cfg.setdefault("obstacle_vehicle_count", 0)
+    env_cfg.setdefault("localization_delay_sec", 0.0)
+    env_cfg.setdefault("steering_delay_sec", 0.0)
+    # Saved training configs are copied from configs/default.yaml, so keep relative
+    # paths such as lane.csv anchored to the caller's base config directory.
+    config["_config_path"] = base_config["_config_path"]
+    return config
 
 
 def resolve_path(path: str | Path, config: dict[str, Any], must_exist: bool = False) -> Path:
