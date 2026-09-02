@@ -7,6 +7,7 @@ import numpy as np
 import pygame
 
 from kart_rl.config import PACKAGE_ROOT, load_config, resolve_path
+from kart_rl.evaluate import collect_rollout_data, resolve_model_path
 
 
 def world_to_screen(points, bounds, screen_size, margin=48):
@@ -180,15 +181,32 @@ def cross(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
 
 
+def read_npz_string(data: np.lib.npyio.NpzFile, key: str, default: str) -> str:
+    if key not in data:
+        return default
+    value = data[key]
+    return str(value.item() if value.shape == () else value)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
+    parser.add_argument("--model", default=None)
     parser.add_argument("--rollout", default=None)
+    parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
 
     config = load_config(args.config)
-    rollout_path = resolve_path(args.rollout or config["viewer"]["rollout_path"], config, must_exist=True)
-    data = np.load(rollout_path)
+    if args.rollout:
+        data = np.load(resolve_path(args.rollout, config, must_exist=True))
+        model_dir_name = read_npz_string(data, "model_dir_name", "unknown")
+    else:
+        model_setting = args.model or config["viewer"].get("model_path") or config["train"]["model_path"]
+        model_path = resolve_model_path(model_setting, config)
+        model_dir_name = model_path.parent.name
+        data, total_reward, info = collect_rollout_data(config, model_path, args.deterministic)
+        print(f"Loaded model: {model_path}")
+        print(f"reward={total_reward:.2f} time={info['time']:.2f}s laps={info['lap_count']} collision={info['collision']}")
     frames = data["frames"]
     track = data["track"]
     left_boundary = data["left_boundary"] if "left_boundary" in data else np.empty((0, 2), dtype=np.float32)
@@ -270,13 +288,16 @@ def main() -> None:
         draw_vehicle(screen, frame[1:3], float(frame[3]), vehicle_length, vehicle_width, bounds, screen_size, collision=bool(frame[9]))
         text = f"t={frame[0]:6.2f}s  v={frame[4]:4.2f}m/s  progress={frame[7] * 100:5.1f}%  lateral={frame[8]:+.2f}m"
         screen.blit(font.render(text, True, (25, 29, 33)), (18, 16))
-        screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar", True, (72, 76, 80)), (18, 42))
+        screen.blit(font.render(f"model: {model_dir_name}", True, (25, 29, 33)), (18, 42))
+        screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar", True, (72, 76, 80)), (18, 68))
+        status_y = 94
         if bool(frame[9]):
-            screen.blit(font.render("collision", True, (170, 40, 40)), (18, 68))
+            screen.blit(font.render("collision", True, (170, 40, 40)), (18, status_y))
+            status_y += 26
         if idx == len(frames) - 1:
             screen.blit(
                 font.render(f"rollout end: {termination_reason(frame, frames, config)}", True, (170, 40, 40)),
-                (18, 94 if bool(frame[9]) else 68),
+                (18, status_y),
             )
 
         pygame.display.flip()

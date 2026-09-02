@@ -73,6 +73,27 @@ zenoh:
 dev: SIM_MODE := dev
 dev: simulator autoware-simulator
 	@echo "Start dev simulation (AWSIM + Autoware; controller is selected by reference.launch.xml)"
+	@ref="aichallenge/workspace/src/aichallenge_submit/aichallenge_submit_launch/launch/reference.launch.xml"; \
+	lidar_launch="aichallenge/workspace/src/aichallenge_submit/aichallenge_submit_launch/launch/control/lidar_rl.launch.xml"; \
+	control_method=$$(sed -n 's/.*<arg name="control_method" default="\([^"]*\)".*/\1/p' "$$ref" | head -n 1); \
+	if [ "$$control_method" = "lidar_rl" ]; then \
+		model_path=$$(sed -n 's/.*<arg name="model_path" default="\([^"]*\)".*/\1/p' "$$lidar_launch" | head -n 1); \
+		host_model_path=$$model_path; \
+		case "$$host_model_path" in /aichallenge/*) host_model_path="aichallenge/$${host_model_path#/aichallenge/}" ;; esac; \
+		model_name=$$(basename "$$host_model_path"); \
+		model_dir=$$(dirname "$$host_model_path"); \
+		case "$$host_model_path" in \
+			*.*) resolved_host_path="$$host_model_path" ;; \
+			*) resolved_host_path=$$(find "$$model_dir" -maxdepth 2 -type f -path "$$model_dir/$${model_name}_*/$${model_name}_policy.npz" 2>/dev/null | sort | tail -n 1) ;; \
+		esac; \
+		if [ -n "$$resolved_host_path" ]; then \
+			resolved_container_path=$$resolved_host_path; \
+			case "$$resolved_container_path" in aichallenge/*) resolved_container_path="/aichallenge/$${resolved_container_path#aichallenge/}" ;; esac; \
+			echo "lidar_rl model: $$(basename "$$(dirname "$$resolved_host_path")") ($$resolved_container_path)"; \
+		else \
+			echo "lidar_rl model: not found for $$model_path"; \
+		fi; \
+	fi
 	@echo "To stop: make down  (docker compose down --remove-orphans)"
 
 dev2: SIM_MODE := dev2

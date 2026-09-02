@@ -62,6 +62,6 @@ train:
   clip_range: 0.2
 
 viewer:
-  model_path: "models/ppo_kart.zip"
+  model_path: "models/ppo_kart"
   rollout_path: "rollouts/latest.npz"
   fps: 50

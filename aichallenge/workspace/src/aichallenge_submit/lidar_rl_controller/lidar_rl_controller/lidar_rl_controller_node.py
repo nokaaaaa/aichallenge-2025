@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import re
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -15,6 +17,36 @@ from sensor_msgs.msg import LaserScan
 
 
 SIM_ACCEL_LIMIT_MPS2 = 3.0
+
+
+def resolve_latest_timestamped_policy(base_path: str) -> Path:
+    base = Path(base_path).expanduser()
+    stem = base.with_suffix("") if base.suffix else base
+    pattern = re.compile(rf"^{re.escape(stem.name)}_(\d{{8}}-\d{{6}})(?:_(\d+))?$")
+    candidates: list[tuple[str, int, Path]] = []
+    for run_dir in stem.parent.iterdir() if stem.parent.exists() else []:
+        if not run_dir.is_dir():
+            continue
+        match = pattern.fullmatch(run_dir.name)
+        if not match:
+            continue
+        policy_path = run_dir / f"{stem.name}_policy.npz"
+        if policy_path.exists():
+            candidates.append((match.group(1), int(match.group(2) or 0), policy_path))
+
+    if not candidates:
+        raise FileNotFoundError(
+            f"No timestamped policy found for {stem}. "
+            f"Expected {stem.parent}/{stem.name}_YYYYMMDD-HHMMSS/{stem.name}_policy.npz"
+        )
+    return max(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+def resolve_policy_path(model_path: str) -> Path:
+    path = Path(model_path).expanduser()
+    if path.suffix:
+        return path
+    return resolve_latest_timestamped_policy(model_path)
 
 
 class NumpyPpoPolicy:
@@ -72,10 +104,11 @@ class LidarRlControllerNode(Node):
         self.odometry_topic = str(self.get_parameter("odometry.topic").value)
         self.control_topic = str(self.get_parameter("control.topic").value)
 
-        model_path = str(self.get_parameter("model.path").value)
-        if not model_path:
+        model_path_param = str(self.get_parameter("model.path").value)
+        if not model_path_param:
             raise ValueError("model.path is empty. Set a PPO policy .npz path before starting the node.")
 
+        model_path = resolve_policy_path(model_path_param)
         self.policy = NumpyPpoPolicy(model_path)
         self.input_dim = self.policy.input_dim
         self.current_speed = 0.0

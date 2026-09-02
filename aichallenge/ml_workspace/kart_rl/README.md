@@ -64,7 +64,7 @@ models/ppo_kart_lidar_<timestamp>/
 └─ config.yaml
 ```
 
-`models/ppo_kart_lidar_latest.zip` と `models/ppo_kart_lidar_latest_policy.npz` は最新モデルへの symlink です。`lidar_rl` の ROS 実行は `ppo_kart_lidar_latest_policy.npz` を読みます。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
+`kart-rl-eval` と `lidar_rl` の ROS 実行は、`models/ppo_kart_lidar_<timestamp>/` のうち timestamp が最新のディレクトリからモデルを読みます。`models` 直下の `*_latest*` symlink や `.zip` / `.npz` は自動選択では使いません。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
 
 ## TensorBoard
 
@@ -92,11 +92,12 @@ uv run kart-rl-eval
 uv run kart-rl-eval --config configs/state.yaml
 ```
 
-ビューアを起動します。
+ビューアを起動します。`--rollout` を指定しない場合は、timestamp が最新のモデルを読み込んで、その場で評価した軌跡を表示します。
 
 ```bash
 uv run kart-rl-viewer
 uv run kart-rl-viewer --config configs/state.yaml
+uv run kart-rl-viewer --rollout rollouts/latest_lidar.npz
 ```
 
 操作:
