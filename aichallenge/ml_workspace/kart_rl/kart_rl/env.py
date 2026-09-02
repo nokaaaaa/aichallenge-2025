@@ -90,6 +90,10 @@ class RacingKartEnv(gym.Env):
         self.reward_cfg = config["reward"]
         self.lookahead = (2.0, 5.0, 10.0, 18.0)
         self.projection_window_m = max(20.0, self.max_speed * self.dt * 10.0)
+        self.obstacle_avoidance_lookahead_m = float(
+            env_cfg.get("obstacle_avoidance_lookahead_m", max(12.0, self.max_speed * 3.0))
+        )
+        self.obstacle_clearance_m = float(env_cfg.get("obstacle_clearance_m", self.vehicle_width + 0.5))
 
         # action = [steer_correction_ratio] for new models. Older saved models may
         # still output [target_speed_ratio, steer_correction_ratio]; speed is fixed.
@@ -334,6 +338,43 @@ class RacingKartEnv(gym.Env):
     def _track_gap(self, a: float, b: float) -> float:
         return float(abs((a - b + 0.5 * self.track.length) % self.track.length - 0.5 * self.track.length))
 
+    def _nearest_forward_obstacle(self, s: float, lookahead_m: float | None = None) -> tuple[ObstacleVehicle | None, float]:
+        lookahead = self.obstacle_avoidance_lookahead_m if lookahead_m is None else lookahead_m
+        nearest: ObstacleVehicle | None = None
+        nearest_delta = float("inf")
+        for vehicle in self.obstacle_vehicles:
+            delta = float((vehicle.s - s) % self.track.length)
+            if 1e-6 < delta <= lookahead and delta < nearest_delta:
+                nearest = vehicle
+                nearest_delta = delta
+        return nearest, nearest_delta
+
+    def _obstacle_avoidance_penalty(self, proj) -> float:
+        obstacle, delta_s = self._nearest_forward_obstacle(proj.s)
+        if obstacle is None:
+            return 0.0
+        proximity = 1.0 - np.clip(delta_s / max(self.obstacle_avoidance_lookahead_m, 1e-6), 0.0, 1.0)
+        lateral_clearance = abs(proj.lateral_error - obstacle.lateral)
+        clearance_deficit = np.clip(
+            (self.obstacle_clearance_m - lateral_clearance) / max(self.obstacle_clearance_m, 1e-6),
+            0.0,
+            1.0,
+        )
+        return float((proximity * proximity) * clearance_deficit)
+
+    def obstacle_state_features(self, proj) -> np.ndarray:
+        obstacle, delta_s = self._nearest_forward_obstacle(proj.s)
+        features = np.zeros(3, dtype=np.float32)
+        if obstacle is None:
+            features[0] = 1.0
+            return features
+
+        local_half_width = max(abs(proj.lateral_min), abs(proj.lateral_max), 1e-3)
+        features[0] = np.clip(delta_s / max(self.obstacle_avoidance_lookahead_m, 1e-6), 0.0, 1.0)
+        features[1] = 0.5 * (np.clip(obstacle.lateral / local_half_width, -1.0, 1.0) + 1.0)
+        features[2] = np.clip(abs(proj.lateral_error - obstacle.lateral) / max(self.obstacle_clearance_m, 1e-6), 0.0, 1.0)
+        return features
+
     def _obs(self, proj) -> np.ndarray:
         obs = np.concatenate(
             [
@@ -456,6 +497,7 @@ class RacingKartEnv(gym.Env):
         reward -= r["action_smooth"] * float(np.linalg.norm(action - self.prev_action))
         if self.state.speed < self.min_moving_speed:
             reward -= r.get("low_speed", 0.0)
+        reward -= r.get("obstacle_avoidance", 0.0) * self._obstacle_avoidance_penalty(proj)
         if collision:
             reward -= r["wall_collision"]
         if stopped:

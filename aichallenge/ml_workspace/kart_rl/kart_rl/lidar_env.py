@@ -25,9 +25,10 @@ class LidarRacingKartEnv(RacingKartEnv):
         self.range_max = float(lidar_cfg["range_max"])
         self.ray_chunk_size = int(lidar_cfg.get("ray_chunk_size", 64))
         self.include_vehicle_state = bool(lidar_cfg.get("include_vehicle_state", False))
+        self.include_obstacle_state = bool(lidar_cfg.get("include_obstacle_state", False))
         self.full_angles = np.arange(self.angle_min, self.angle_max + 0.5 * self.angle_increment, self.angle_increment)
         self.angles = self.full_angles[:: self.sample_stride]
-        observation_dim = len(self.angles) + (2 if self.include_vehicle_state else 0)
+        observation_dim = len(self.angles) + (2 if self.include_vehicle_state else 0) + (3 if self.include_obstacle_state else 0)
         self.observation_space = spaces.Box(
             low=np.zeros(observation_dim, dtype=np.float32),
             high=np.ones(observation_dim, dtype=np.float32),
@@ -49,6 +50,8 @@ class LidarRacingKartEnv(RacingKartEnv):
                 dtype=np.float32,
             )
             obs = np.concatenate([obs, vehicle_state])
+        if self.include_obstacle_state:
+            obs = np.concatenate([obs, self.obstacle_state_features(proj)])
         return obs
 
     def _apply_action(self, action: np.ndarray) -> None:

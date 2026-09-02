@@ -295,6 +295,70 @@ def draw_button(surface, font, rect: pygame.Rect, label: str, enabled: bool = Tr
     surface.blit(text, text.get_rect(center=rect.center))
 
 
+def model_picker_visible_range(total: int, highlighted: int, max_rows: int) -> tuple[int, int]:
+    if total <= 0:
+        return 0, 0
+    rows = min(total, max_rows)
+    highlighted = int(np.clip(highlighted, 0, total - 1))
+    start = int(np.clip(highlighted - rows // 2, 0, max(total - rows, 0)))
+    return start, start + rows
+
+
+def model_picker_row_at(pos: tuple[int, int], rect: pygame.Rect, total: int, highlighted: int, max_rows: int) -> int | None:
+    if not rect.collidepoint(pos):
+        return None
+    start, end = model_picker_visible_range(total, highlighted, max_rows)
+    row_y = rect.y + 46
+    row_h = 28
+    for row, model_index in enumerate(range(start, end)):
+        item_rect = pygame.Rect(rect.x + 12, row_y + row * row_h, rect.width - 24, row_h - 2)
+        if item_rect.collidepoint(pos):
+            return model_index
+    return None
+
+
+def draw_model_picker(
+    surface,
+    font,
+    small_font,
+    rect: pygame.Rect,
+    model_paths: list[Path],
+    selected_model_index: int,
+    highlighted_model_index: int,
+    max_rows: int,
+) -> None:
+    overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    overlay.fill((25, 29, 33, 96))
+    surface.blit(overlay, (0, 0))
+
+    pygame.draw.rect(surface, (248, 249, 246), rect, border_radius=6)
+    pygame.draw.rect(surface, (65, 70, 73), rect, width=1, border_radius=6)
+    title = f"select model ({len(model_paths)})"
+    surface.blit(font.render(title, True, (25, 29, 33)), (rect.x + 14, rect.y + 14))
+
+    start, end = model_picker_visible_range(len(model_paths), highlighted_model_index, max_rows)
+    row_y = rect.y + 46
+    row_h = 28
+    for row, model_index in enumerate(range(start, end)):
+        path = model_paths[model_index]
+        item_rect = pygame.Rect(rect.x + 12, row_y + row * row_h, rect.width - 24, row_h - 2)
+        if model_index == highlighted_model_index:
+            pygame.draw.rect(surface, (220, 229, 232), item_rect, border_radius=4)
+        if model_index == selected_model_index:
+            pygame.draw.rect(surface, (198, 58, 42), item_rect, width=2, border_radius=4)
+
+        label = f"{model_index + 1:3d}  {display_model_name(path)}"
+        if len(label) > 78:
+            label = label[:75] + "..."
+        surface.blit(small_font.render(label, True, (25, 29, 33)), (item_rect.x + 10, item_rect.y + 5))
+
+    if start > 0 or end < len(model_paths):
+        footer = f"{start + 1}-{end} / {len(model_paths)}"
+        surface.blit(small_font.render(footer, True, (72, 76, 80)), (rect.x + 14, rect.bottom - 28))
+    hint = "enter/click: load  esc: close"
+    surface.blit(small_font.render(hint, True, (72, 76, 80)), (rect.right - 260, rect.bottom - 28))
+
+
 def env_summary(config: dict) -> str:
     env_cfg = config.get("env", {})
     vehicle_cfg = config.get("vehicle", {})
@@ -419,24 +483,70 @@ def main() -> None:
     paused = False
     running = True
     fps = int(config["viewer"].get("fps", 50))
-    prev_button = pygame.Rect(screen_size[0] - 196, 15, 42, 30)
-    next_button = pygame.Rect(screen_size[0] - 146, 15, 42, 30)
+    model_picker_open = False
+    highlighted_model_index = max(selected_model_index, 0)
+    model_picker_max_rows = 18
+    model_picker_rect = pygame.Rect(150, 82, screen_size[0] - 300, 46 + model_picker_max_rows * 28 + 42)
+    prev_button = pygame.Rect(screen_size[0] - 278, 15, 42, 30)
+    next_button = pygame.Rect(screen_size[0] - 228, 15, 42, 30)
+    list_button = pygame.Rect(screen_size[0] - 178, 15, 74, 30)
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.MOUSEWHEEL and model_picker_open and model_paths:
+                highlighted_model_index = int(np.clip(highlighted_model_index - event.y, 0, len(model_paths) - 1))
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if prev_button.collidepoint(event.pos) and model_paths:
+                if model_picker_open:
+                    clicked_model_index = model_picker_row_at(
+                        event.pos,
+                        model_picker_rect,
+                        len(model_paths),
+                        highlighted_model_index,
+                        model_picker_max_rows,
+                    )
+                    if clicked_model_index is not None:
+                        model_picker_open = False
+                        select_model(clicked_model_index)
+                    elif not model_picker_rect.collidepoint(event.pos):
+                        model_picker_open = False
+                elif prev_button.collidepoint(event.pos) and model_paths:
                     select_model(selected_model_index - 1)
                 elif next_button.collidepoint(event.pos) and model_paths:
                     select_model(selected_model_index + 1)
+                elif list_button.collidepoint(event.pos) and model_paths:
+                    model_picker_open = True
+                    paused = True
+                    highlighted_model_index = max(selected_model_index, 0)
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE:
+                if model_picker_open:
+                    if event.key == pygame.K_ESCAPE:
+                        model_picker_open = False
+                    elif event.key == pygame.K_RETURN:
+                        model_picker_open = False
+                        select_model(highlighted_model_index)
+                    elif event.key == pygame.K_UP and model_paths:
+                        highlighted_model_index = max(highlighted_model_index - 1, 0)
+                    elif event.key == pygame.K_DOWN and model_paths:
+                        highlighted_model_index = min(highlighted_model_index + 1, len(model_paths) - 1)
+                    elif event.key == pygame.K_PAGEUP and model_paths:
+                        highlighted_model_index = max(highlighted_model_index - model_picker_max_rows, 0)
+                    elif event.key == pygame.K_PAGEDOWN and model_paths:
+                        highlighted_model_index = min(highlighted_model_index + model_picker_max_rows, len(model_paths) - 1)
+                    elif event.key == pygame.K_HOME and model_paths:
+                        highlighted_model_index = 0
+                    elif event.key == pygame.K_END and model_paths:
+                        highlighted_model_index = len(model_paths) - 1
+                elif event.key == pygame.K_SPACE:
                     paused = not paused
                 elif event.key == pygame.K_r:
                     idx = 0
                 elif event.key == pygame.K_l:
                     show_lidar = not show_lidar
+                elif event.key == pygame.K_m and model_paths:
+                    model_picker_open = True
+                    paused = True
+                    highlighted_model_index = max(selected_model_index, 0)
                 elif event.key == pygame.K_COMMA and model_paths:
                     select_model(selected_model_index - 1)
                 elif event.key == pygame.K_PERIOD and model_paths:
@@ -446,7 +556,7 @@ def main() -> None:
                 elif event.key == pygame.K_LEFT:
                     idx = max(idx - fps, 0)
 
-        if not paused:
+        if not paused and not model_picker_open:
             idx = min(idx + 1, len(view["frames"]) - 1)
 
         screen.fill((236, 238, 232))
@@ -498,11 +608,12 @@ def main() -> None:
         screen.blit(font.render(text, True, (25, 29, 33)), (18, 16))
         screen.blit(font.render(f"model: {model_dir_name}", True, (25, 29, 33)), (18, 42))
         screen.blit(font.render(env_summary(active_config), True, (25, 29, 33)), (18, 68))
-        screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar  </>: model", True, (72, 76, 80)), (18, 94))
+        screen.blit(font.render("space: pause  left/right: seek  r: restart  l: lidar  m: model list", True, (72, 76, 80)), (18, 94))
         draw_button(screen, small_font, prev_button, "<", bool(model_paths))
         draw_button(screen, small_font, next_button, ">", bool(model_paths))
+        draw_button(screen, small_font, list_button, "list", bool(model_paths))
         model_count = f"{selected_model_index + 1}/{len(model_paths)}" if selected_model_index >= 0 else f"-/{len(model_paths)}"
-        screen.blit(small_font.render(model_count, True, (25, 29, 33)), (screen_size[0] - 98, 21))
+        screen.blit(small_font.render(model_count, True, (25, 29, 33)), (screen_size[0] - 96, 21))
         status_y = 120
         if model_error:
             screen.blit(font.render(f"model load error: {model_error[:88]}", True, (170, 40, 40)), (18, status_y))
@@ -514,6 +625,18 @@ def main() -> None:
             screen.blit(
                 font.render(f"rollout end: {termination_reason(frame, view['frames'], active_config)}", True, (170, 40, 40)),
                 (18, status_y),
+            )
+
+        if model_picker_open:
+            draw_model_picker(
+                screen,
+                font,
+                small_font,
+                model_picker_rect,
+                model_paths,
+                selected_model_index,
+                highlighted_model_index,
+                model_picker_max_rows,
             )
 
         pygame.display.flip()
