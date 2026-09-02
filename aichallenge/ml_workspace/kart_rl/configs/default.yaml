@@ -47,6 +47,7 @@ env:
   obstacle_lateral_margin_m: 0.25
   obstacle_avoidance_lookahead_m: 16.0
   obstacle_clearance_m: 2.2
+  wall_clearance_m: 2.2
   obstacle_placement_attempts: 2000
   localization_delay_sec: 0.5
   steering_delay_sec: 0.2
@@ -57,12 +58,12 @@ env:
 reward:
   progress: 35.0
   speed: 0.04
-  lateral_error: 1.2
+  lateral_error: 0.0
   heading_error: 0.5
   steer: 0.01
   action_smooth: 0.02
   wasted_motion: 2.5
-  obstacle_avoidance: 4.0
+  hazard_avoidance: 4.0
   low_speed: 0.08
   stopped: 120.0
   wall_collision: 300.0
