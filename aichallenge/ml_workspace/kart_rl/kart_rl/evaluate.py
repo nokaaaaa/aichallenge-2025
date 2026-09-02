@@ -22,11 +22,18 @@ def resolve_model_path(model_setting: str | Path, config: dict) -> Path:
     return resolve_latest_timestamped_artifact(model_setting, config, ".zip")
 
 
-def collect_rollout_data(config: dict, model_path: Path, deterministic: bool = True) -> tuple[dict, float, dict]:
+def collect_rollout_data(
+    config: dict,
+    model_path: Path,
+    deterministic: bool = True,
+    seed: int | None = None,
+    random_seed: bool = False,
+) -> tuple[dict, float, dict]:
     env = make_racing_env(config)
     try:
         model = load_model(config, env, model_path)
-        obs, info = env.reset(seed=int(config.get("seed", 42)))
+        reset_seed = None if random_seed else int(config.get("seed", 42) if seed is None else seed)
+        obs, info = env.reset(seed=reset_seed)
         frames = []
         lidar_scans = []
         total_reward = 0.0

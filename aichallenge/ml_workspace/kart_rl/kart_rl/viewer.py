@@ -409,7 +409,7 @@ def main() -> None:
             path = model_paths[index]
             candidate_config = load_config_for_model(path, config)
             try:
-                data, total_reward, info = collect_rollout_data(candidate_config, path, args.deterministic)
+                data, total_reward, info = collect_rollout_data(candidate_config, path, args.deterministic, random_seed=True)
             except Exception as exc:
                 errors.append(f"{display_model_name(path)}: {exc}")
                 print(f"Failed to load model: {path}: {exc}")
@@ -462,7 +462,7 @@ def main() -> None:
         screen.blit(font.render(f"loading model: {model_dir_name}", True, (25, 29, 33)), (18, 16))
         pygame.display.flip()
         try:
-            data, total_reward, info = collect_rollout_data(candidate_config, selected_model_path, args.deterministic)
+            data, total_reward, info = collect_rollout_data(candidate_config, selected_model_path, args.deterministic, random_seed=True)
             active_config = candidate_config
             view = prepare_view_data(data, active_config, screen_size)
             show_lidar = view["lidar_angles"] is not None
@@ -540,7 +540,10 @@ def main() -> None:
                 elif event.key == pygame.K_SPACE:
                     paused = not paused
                 elif event.key == pygame.K_r:
-                    idx = 0
+                    if model_paths and selected_model_index >= 0:
+                        select_model(selected_model_index)
+                    else:
+                        idx = 0
                 elif event.key == pygame.K_l:
                     show_lidar = not show_lidar
                 elif event.key == pygame.K_m and model_paths:
