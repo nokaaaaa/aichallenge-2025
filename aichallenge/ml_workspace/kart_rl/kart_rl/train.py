@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import yaml
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from kart_rl.config import PACKAGE_ROOT, load_config, resolve_path
+from kart_rl.config import PACKAGE_ROOT, load_config, load_config_for_model, resolve_latest_timestamped_artifact, resolve_path
 from kart_rl.env_factory import make_racing_env
 
 
@@ -52,6 +52,18 @@ def build_model(config, env):
     raise ValueError(f"Unsupported algorithm: {algo}")
 
 
+def load_model(config, env, model_path: Path):
+    algo = config["train"].get("algorithm", "ppo").lower()
+    cls = PPO if algo == "ppo" else SAC
+    return cls.load(str(model_path), env=env, device=config["train"].get("device", "cuda"))
+
+
+def resolve_model_path(model_setting: str | Path, config: dict) -> Path:
+    if Path(model_setting).suffix:
+        return resolve_path(model_setting, config, must_exist=True)
+    return resolve_latest_timestamped_artifact(model_setting, config, ".zip")
+
+
 def export_ppo_policy_npz(model: PPO, model_path: Path) -> Path:
     policy_path = model_path.with_name(f"{model_path.name}_policy.npz")
     state = {
@@ -85,7 +97,8 @@ def save_training_artifacts(model: BaseAlgorithm, config: dict, train_cfg: dict)
     model_path = make_run_model_path(base_model_path)
     model.save(str(model_path))
     config_out = model_path.parent / "config.yaml"
-    shutil.copy2(config["_config_path"], config_out)
+    with config_out.open("w", encoding="utf-8") as f:
+        yaml.safe_dump({key: value for key, value in config.items() if key != "_config_path"}, f, sort_keys=False)
     if train_cfg.get("algorithm", "ppo").lower() == "ppo":
         policy_path = export_ppo_policy_npz(model, Path(model_path))
         update_latest_symlink(policy_path, base_model_path.with_name(f"{base_model_path.name}_latest_policy.npz"))
@@ -101,9 +114,13 @@ def main() -> None:
     parser.add_argument("--config", default=str(PACKAGE_ROOT / "configs" / "default.yaml"))
     parser.add_argument("--check-env", action="store_true")
     parser.add_argument("--timesteps", type=int, default=None)
+    parser.add_argument("--resume-model", "--model", dest="resume_model", default=None)
     args = parser.parse_args()
 
     config = load_config(args.config)
+    resume_model_path = resolve_model_path(args.resume_model, config) if args.resume_model else None
+    if resume_model_path is not None:
+        config = load_config_for_model(resume_model_path, config)
     seed = int(config.get("seed", 42))
 
     if args.check_env:
@@ -116,11 +133,15 @@ def main() -> None:
     n_envs = int(train_cfg.get("n_envs", 1))
     vec_cls = SubprocVecEnv if n_envs > 1 else DummyVecEnv
     env = vec_cls([make_env(config, seed, i) for i in range(n_envs)])
-    model = build_model(config, env)
+    if resume_model_path is None:
+        model = build_model(config, env)
+    else:
+        model = load_model(config, env, resume_model_path)
+        print(f"Resuming model: {resume_model_path}")
     timesteps = int(args.timesteps or train_cfg["total_timesteps"])
     try:
         try:
-            model.learn(total_timesteps=timesteps, progress_bar=True)
+            model.learn(total_timesteps=timesteps, progress_bar=True, reset_num_timesteps=resume_model_path is None)
         except KeyboardInterrupt:
             print("Training interrupted. Saving current model before exit...")
         save_training_artifacts(model, config, train_cfg)

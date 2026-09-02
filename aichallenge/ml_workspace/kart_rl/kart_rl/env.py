@@ -94,6 +94,7 @@ class RacingKartEnv(gym.Env):
             env_cfg.get("obstacle_avoidance_lookahead_m", max(12.0, self.max_speed * 3.0))
         )
         self.obstacle_clearance_m = float(env_cfg.get("obstacle_clearance_m", self.vehicle_width + 0.5))
+        self.wall_clearance_m = float(env_cfg.get("wall_clearance_m", self.obstacle_clearance_m))
 
         # action = [steer_correction_ratio] for new models. Older saved models may
         # still output [target_speed_ratio, steer_correction_ratio]; speed is fixed.
@@ -362,6 +363,18 @@ class RacingKartEnv(gym.Env):
         )
         return float((proximity * proximity) * clearance_deficit)
 
+    def _wall_avoidance_penalty(self, proj) -> float:
+        wall_clearance = min(proj.lateral_error - proj.lateral_min, proj.lateral_max - proj.lateral_error)
+        clearance_deficit = np.clip(
+            (self.wall_clearance_m - wall_clearance) / max(self.wall_clearance_m, 1e-6),
+            0.0,
+            1.0,
+        )
+        return float(clearance_deficit)
+
+    def _hazard_avoidance_penalty(self, proj) -> float:
+        return max(self._wall_avoidance_penalty(proj), self._obstacle_avoidance_penalty(proj))
+
     def obstacle_state_features(self, proj) -> np.ndarray:
         obstacle, delta_s = self._nearest_forward_obstacle(proj.s)
         features = np.zeros(3, dtype=np.float32)
@@ -490,14 +503,17 @@ class RacingKartEnv(gym.Env):
         reward += r["speed"] * self.state.speed
         if distance_moved > 1e-6:
             reward -= r.get("wasted_motion", 0.0) * max(distance_moved - max(progress, 0.0), 0.0)
-        local_half_width = max(abs(proj.lateral_min), abs(proj.lateral_max), 1e-3)
-        reward -= r["lateral_error"] * abs(proj.lateral_error / local_half_width)
+        lateral_error_weight = r.get("lateral_error", 0.0)
+        if lateral_error_weight:
+            local_half_width = max(abs(proj.lateral_min), abs(proj.lateral_max), 1e-3)
+            reward -= lateral_error_weight * abs(proj.lateral_error / local_half_width)
         reward -= r["heading_error"] * abs(proj.heading_error / np.pi)
         reward -= r["steer"] * abs(self.state.steer / self.max_steer)
         reward -= r["action_smooth"] * float(np.linalg.norm(action - self.prev_action))
         if self.state.speed < self.min_moving_speed:
             reward -= r.get("low_speed", 0.0)
-        reward -= r.get("obstacle_avoidance", 0.0) * self._obstacle_avoidance_penalty(proj)
+        hazard_avoidance_weight = r.get("hazard_avoidance", r.get("obstacle_avoidance", 0.0))
+        reward -= hazard_avoidance_weight * self._hazard_avoidance_penalty(proj)
         if collision:
             reward -= r["wall_collision"]
         if stopped:

@@ -55,6 +55,15 @@ uv run kart-rl-train --timesteps 5000
 uv run kart-rl-train --config configs/state.yaml --timesteps 5000
 ```
 
+既存モデルから追加で学習する場合:
+
+```bash
+uv run kart-rl-train --resume-model models/ppo_kart_lidar_YYYYMMDD-HHMMSS/ppo_kart_lidar.zip
+uv run kart-rl-train --resume-model models/ppo_kart_lidar --timesteps 100000
+```
+
+`--resume-model` は `--model` でも指定できます。拡張子なしの `models/ppo_kart_lidar` を指定した場合は、最新 timestamp のモデルを読み込みます。
+
 デフォルトでは学習ごとに `models/ppo_kart_lidar_<timestamp>/` を作り、モデル、ROS実行用policy、使用した設定ファイルを保存します。
 
 ```text
