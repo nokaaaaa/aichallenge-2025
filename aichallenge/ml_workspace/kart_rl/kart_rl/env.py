@@ -26,6 +26,7 @@ class ObstacleVehicle:
     x: float
     y: float
     yaw: float
+    lateral: float
 
 
 class RacingKartEnv(gym.Env):
@@ -241,22 +242,51 @@ class RacingKartEnv(gym.Env):
             if lateral_min > lateral_max:
                 continue
 
-            lateral = float(self.np_random.uniform(lateral_min, lateral_max))
-            normal = np.array([-np.sin(yaw), np.cos(yaw)])
-            x = float(center_x + normal[0] * lateral)
-            y = float(center_y + normal[1] * lateral)
-            candidate = ObstacleVehicle(s=s, x=x, y=y, yaw=float(yaw))
-            candidate_polygon = self._vehicle_polygon_at(candidate.x, candidate.y, candidate.yaw)
-            if any(
-                _polygons_intersect(candidate_polygon, self._vehicle_polygon_at(vehicle.x, vehicle.y, vehicle.yaw))
-                for vehicle in vehicles
-            ):
+            placement = self._place_obstacle_near_wall(s, center_x, center_y, yaw, lateral_min, lateral_max, vehicles)
+            if placement is None:
                 continue
+            candidate, _ = placement
             vehicles.append(candidate)
 
         if len(vehicles) != self.obstacle_vehicle_count:
             raise RuntimeError(f"Could only place {len(vehicles)} obstacle vehicles out of {self.obstacle_vehicle_count}")
         return vehicles
+
+    def _place_obstacle_near_wall(
+        self,
+        s: float,
+        center_x: float,
+        center_y: float,
+        yaw: float,
+        lateral_min: float,
+        lateral_max: float,
+        vehicles: list[ObstacleVehicle],
+    ) -> tuple[ObstacleVehicle, np.ndarray] | None:
+        side_indices = self.np_random.permutation(2)
+        max_inward_offset = max(lateral_max - lateral_min, 0.0)
+        step = 0.05
+        normal = np.array([-np.sin(yaw), np.cos(yaw)])
+
+        for side_idx in side_indices:
+            edge_lateral = lateral_min if side_idx == 0 else lateral_max
+            inward_direction = 1.0 if side_idx == 0 else -1.0
+            for inward_offset in np.arange(0.0, max_inward_offset + step, step):
+                lateral = float(edge_lateral + inward_direction * inward_offset)
+                if lateral < lateral_min or lateral > lateral_max:
+                    continue
+                x = float(center_x + normal[0] * lateral)
+                y = float(center_y + normal[1] * lateral)
+                candidate = ObstacleVehicle(s=s, x=x, y=y, yaw=float(yaw), lateral=lateral)
+                candidate_polygon = self._vehicle_polygon_at(candidate.x, candidate.y, candidate.yaw)
+                if self._intersects_lane_boundary(candidate_polygon):
+                    continue
+                if any(
+                    _polygons_intersect(candidate_polygon, self._vehicle_polygon_at(vehicle.x, vehicle.y, vehicle.yaw))
+                    for vehicle in vehicles
+                ):
+                    continue
+                return candidate, candidate_polygon
+        return None
 
     def _collides_with_obstacle(self) -> bool:
         ego_polygon = self._vehicle_polygon()
@@ -280,6 +310,17 @@ class RacingKartEnv(gym.Env):
         )
         rot = np.array([[c, -s], [s, c]], dtype=np.float64)
         return corners @ rot.T + np.array([x, y], dtype=np.float64)
+
+    def _intersects_lane_boundary(self, polygon: np.ndarray) -> bool:
+        if self.track.lane_segments is None or len(self.track.lane_segments) == 0:
+            return False
+        center = polygon.mean(axis=0)
+        radius = 0.5 * np.hypot(self.vehicle_length, self.vehicle_width)
+        p0 = self.track.lane_segments[:, 0, :]
+        p1 = self.track.lane_segments[:, 1, :]
+        midpoint = p0 + 0.5 * (p1 - p0)
+        nearby = np.linalg.norm(midpoint - center, axis=1) <= radius + 0.5 * np.linalg.norm(p1 - p0, axis=1)
+        return any(_segment_intersects_polygon(a, b, polygon) for a, b in self.track.lane_segments[nearby])
 
     def _obstacle_segments(self) -> np.ndarray:
         if not self.obstacle_vehicles:
@@ -468,3 +509,47 @@ def _polygons_intersect(a: np.ndarray, b: np.ndarray) -> bool:
             if a_proj.max() < b_proj.min() or b_proj.max() < a_proj.min():
                 return False
     return True
+
+
+def _segment_intersects_polygon(a: np.ndarray, b: np.ndarray, polygon: np.ndarray) -> bool:
+    if _point_in_polygon(a, polygon) or _point_in_polygon(b, polygon):
+        return True
+    for idx in range(len(polygon)):
+        c = polygon[idx]
+        d = polygon[(idx + 1) % len(polygon)]
+        if _segments_intersect(a, b, c, d):
+            return True
+    return False
+
+
+def _segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> bool:
+    ab = b - a
+    cd = d - c
+    ac = c - a
+    denom = _cross(ab, cd)
+    if abs(float(denom)) < 1e-9:
+        return _point_on_segment(c, a, b) or _point_on_segment(d, a, b) or _point_on_segment(a, c, d) or _point_on_segment(b, c, d)
+    t = _cross(ac, cd) / denom
+    u = _cross(ac, ab) / denom
+    return bool(0.0 <= t <= 1.0 and 0.0 <= u <= 1.0)
+
+
+def _point_on_segment(p: np.ndarray, a: np.ndarray, b: np.ndarray) -> bool:
+    return bool(abs(float(_cross(b - a, p - a))) < 1e-9 and np.dot(p - a, p - b) <= 1e-9)
+
+
+def _point_in_polygon(point: np.ndarray, polygon: np.ndarray) -> bool:
+    x, y = point
+    inside = False
+    j = len(polygon) - 1
+    for i in range(len(polygon)):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _cross(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]

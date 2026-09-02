@@ -43,7 +43,8 @@ def vehicle_segments(vehicles: np.ndarray, length: float, width: float) -> np.nd
     half_w = 0.5 * width
     corners = np.array([[half_l, half_w], [half_l, -half_w], [-half_l, -half_w], [-half_l, half_w]], dtype=np.float64)
     segments = []
-    for x, y, yaw in vehicles:
+    for row in vehicles:
+        x, y, yaw = row[:3]
         c, s = math.cos(float(yaw)), math.sin(float(yaw))
         rot = np.array([[c, -s], [s, c]], dtype=np.float64)
         polygon = corners @ rot.T + np.array([x, y], dtype=np.float64)

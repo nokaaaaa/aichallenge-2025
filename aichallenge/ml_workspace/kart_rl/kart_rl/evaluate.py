@@ -90,7 +90,7 @@ def collect_rollout_data(config: dict, model_path: Path, deterministic: bool = T
             vehicle_length=np.float32(env.vehicle_length),
             vehicle_width=np.float32(env.vehicle_width),
             obstacle_vehicles=np.asarray(
-                [[vehicle.x, vehicle.y, vehicle.yaw] for vehicle in env.obstacle_vehicles],
+                [[vehicle.x, vehicle.y, vehicle.yaw, vehicle.s, vehicle.lateral] for vehicle in env.obstacle_vehicles],
                 dtype=np.float32,
             ),
             total_reward=np.float32(total_reward),
