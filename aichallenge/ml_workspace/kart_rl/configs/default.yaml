@@ -19,7 +19,7 @@ lidar:
   frame_stack: 4
   ray_chunk_size: 64
   include_vehicle_state: true
-  include_obstacle_state: false
+  include_obstacle_state: true
 
 vehicle:
   wheelbase_m: 1.087
@@ -34,7 +34,7 @@ vehicle:
 
 env:
   type: "lidar"
-  action_dim: 1
+  action_dim: 2
   lidar_steering_mode: "pure_pursuit_correction"
   dt: 0.05
   max_episode_steps: 4000
@@ -54,11 +54,11 @@ env:
   obstacle_vehicle_count: 3
   fixed_obstacles:
     - s_offset_m: 11.0
-      lateral_m: -1.9
+      lateral_m: -1.75
     - s_offset_m: 20.0
-      lateral_m: -1.9
+      lateral_m: 1.20
     - s_offset_m: 27.0
-      lateral_m: -1.9
+      lateral_m: -1.55
   obstacle_min_gap_m: 8.0
   obstacle_start_clearance_m: 8.0
   obstacle_lateral_margin_m: 0.25
@@ -66,8 +66,8 @@ env:
   obstacle_straight_curvature_threshold: 0.035
   obstacle_straight_sample_step_m: 0.5
   obstacle_avoidance_lookahead_m: 24.0
-  obstacle_clearance_m: 1.55
-  wall_clearance_m: 1.30
+  obstacle_clearance_m: 1.65
+  wall_clearance_m: 1.35
   obstacle_placement_attempts: 2000
   localization_delay_sec: 0.5
   steering_delay_sec: 0.2
@@ -84,6 +84,9 @@ reward:
   action_smooth: 0.01
   wasted_motion: 1.0
   hazard_avoidance: 4.0
+  obstacle_pass_side: 2.5
+  obstacle_risk_speed: 1.5
+  obstacle_pass_bonus: 120.0
   low_speed: 0.08
   stopped: 120.0
   wall_collision: 300.0
@@ -93,7 +96,7 @@ reward:
 train:
   algorithm: ppo
   device: "cuda"
-  total_timesteps: 800000
+  total_timesteps: 1200000
   n_envs: 4
   model_path: "models/ppo_kart_lidar"
   tensorboard_log: "runs/tensorboard_lidar"
@@ -103,43 +106,6 @@ train:
   gamma: 0.995
   gae_lambda: 0.95
   clip_range: 0.2
-  curriculum:
-    - timesteps: 0
-      obstacle_vehicle_count: 0
-      max_speed_mps: 1.6
-      localization_delay_sec: 0.0
-      steering_delay_sec: 0.0
-      max_steer_correction_ratio: 0.15
-    - timesteps: 100000
-      obstacle_vehicle_count: 0
-      max_speed_mps: 2.2
-      localization_delay_sec: 0.15
-      steering_delay_sec: 0.05
-      max_steer_correction_ratio: 0.18
-    - timesteps: 200000
-      obstacle_vehicle_count: 1
-      max_speed_mps: 2.6
-      localization_delay_sec: 0.25
-      steering_delay_sec: 0.10
-      max_steer_correction_ratio: 0.22
-    - timesteps: 325000
-      obstacle_vehicle_count: 2
-      max_speed_mps: 3.0
-      localization_delay_sec: 0.35
-      steering_delay_sec: 0.15
-      max_steer_correction_ratio: 0.25
-    - timesteps: 450000
-      obstacle_vehicle_count: 3
-      max_speed_mps: 3.4
-      localization_delay_sec: 0.45
-      steering_delay_sec: 0.20
-      max_steer_correction_ratio: 0.25
-    - timesteps: 600000
-      obstacle_vehicle_count: 3
-      max_speed_mps: 4.165
-      localization_delay_sec: 0.5
-      steering_delay_sec: 0.2
-      max_steer_correction_ratio: 0.25
 
 viewer:
   model_path: "models/ppo_kart_lidar"

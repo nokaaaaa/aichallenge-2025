@@ -123,6 +123,8 @@ class RacingKartEnv(gym.Env):
         self.finish_progress_s = self.track.length * self.finish_laps
         self.episode_finished = False
         self.finish_reason = ""
+        self.episode_start_s = 0.0
+        self.passed_obstacle_count = 0
         self.stopped_steps = 0
         self.commanded_steer = 0.0
         self.localized_state = VehicleState(0.0, 0.0, 0.0, 0.0, 0.0)
@@ -165,6 +167,7 @@ class RacingKartEnv(gym.Env):
         y += lateral * np.cos(yaw)
         yaw = float(wrap_angle(yaw + self.np_random.normal(0.0, self.start_noise_yaw)))
         self.state = VehicleState(x=x, y=y, yaw=yaw, speed=1.0, steer=0.0)
+        self.episode_start_s = start_s
         self.obstacle_vehicles = self._generate_obstacle_vehicles(start_s)
         self.finish_progress_s = self._finish_progress_for_start(start_s)
         proj = self.track.project(x, y, yaw)
@@ -177,6 +180,7 @@ class RacingKartEnv(gym.Env):
         self.prev_y = self.state.y
         self.episode_finished = False
         self.finish_reason = ""
+        self.passed_obstacle_count = 0
         self.stopped_steps = 0
         self.commanded_steer = 0.0
         self.localized_state = self._copy_state(self.state)
@@ -231,6 +235,9 @@ class RacingKartEnv(gym.Env):
         max_step_progress = max(self.state.speed * self.dt * 1.2, 1e-3)
         progress = float(np.clip(raw_delta, -max_step_progress, max_step_progress))
         self.progress_s += max(progress, 0.0)
+        passed_obstacle_count = self._passed_obstacle_count()
+        newly_passed_obstacles = max(passed_obstacle_count - self.passed_obstacle_count, 0)
+        self.passed_obstacle_count = passed_obstacle_count
         self.prev_s = proj.s
         self.steps += 1
         self.lap_count = max(0, int(self.progress_s / self.track.length))
@@ -260,6 +267,7 @@ class RacingKartEnv(gym.Env):
             self.episode_finished,
             stopped,
             distance_moved,
+            newly_passed_obstacles=newly_passed_obstacles,
             wall_collision=wall_collision,
             obstacle_collision=obstacle_collision,
         )
@@ -270,6 +278,8 @@ class RacingKartEnv(gym.Env):
             proj,
             collision=collision,
             localized_proj=localized_proj,
+            wall_collision=wall_collision,
+            obstacle_collision=obstacle_collision,
         )
 
     def _is_collision(self, proj) -> bool:
@@ -610,6 +620,31 @@ class RacingKartEnv(gym.Env):
     def _hazard_avoidance_penalty(self, proj) -> float:
         return max(self._wall_avoidance_penalty(proj), self._obstacle_avoidance_penalty(proj))
 
+    def _passed_obstacle_count(self) -> int:
+        count = 0
+        for obstacle in self.obstacle_vehicles:
+            delta_s = float((obstacle.s - self.episode_start_s) % self.track.length)
+            if 1e-6 < delta_s <= self.progress_s:
+                count += 1
+        return count
+
+    def _obstacle_pass_side_reward(self, proj) -> float:
+        obstacle, delta_s = self._nearest_forward_obstacle(proj.s)
+        if obstacle is None:
+            return 0.0
+
+        proximity = 1.0 - np.clip(delta_s / max(self.obstacle_avoidance_lookahead_m, 1e-6), 0.0, 1.0)
+        if proximity <= 0.0 or abs(obstacle.lateral) < 1e-6:
+            return 0.0
+
+        desired_side = -np.sign(obstacle.lateral)
+        local_half_width = max(abs(proj.lateral_min), abs(proj.lateral_max), 1e-3)
+        desired_lateral = float(
+            np.clip(desired_side * self.obstacle_clearance_m, proj.lateral_min * 0.8, proj.lateral_max * 0.8)
+        )
+        alignment = 1.0 - np.clip(abs(proj.lateral_error - desired_lateral) / local_half_width, 0.0, 1.0)
+        return float(proximity * alignment)
+
     def obstacle_state_features(self, proj) -> np.ndarray:
         obstacle, delta_s = self._nearest_forward_obstacle(proj.s)
         features = np.zeros(3, dtype=np.float32)
@@ -732,6 +767,7 @@ class RacingKartEnv(gym.Env):
         finished: bool,
         stopped: bool,
         distance_moved: float,
+        newly_passed_obstacles: int = 0,
         wall_collision: bool | None = None,
         obstacle_collision: bool | None = None,
     ) -> float:
@@ -750,7 +786,11 @@ class RacingKartEnv(gym.Env):
         if self.state.speed < self.min_moving_speed:
             reward -= r.get("low_speed", 0.0)
         hazard_avoidance_weight = r.get("hazard_avoidance", r.get("obstacle_avoidance", 0.0))
-        reward -= hazard_avoidance_weight * self._hazard_avoidance_penalty(proj)
+        hazard_avoidance_penalty = self._hazard_avoidance_penalty(proj)
+        reward -= hazard_avoidance_weight * hazard_avoidance_penalty
+        reward += r.get("obstacle_pass_side", 0.0) * self._obstacle_pass_side_reward(proj)
+        reward -= r.get("obstacle_risk_speed", 0.0) * (self.state.speed / max(self.max_speed, 1e-6)) * hazard_avoidance_penalty
+        reward += r.get("obstacle_pass_bonus", 0.0) * float(newly_passed_obstacles)
         if wall_collision is None:
             wall_collision = collision
         if obstacle_collision is None:
@@ -765,9 +805,20 @@ class RacingKartEnv(gym.Env):
             reward += r["lap_complete"]
         return float(reward)
 
-    def _info(self, proj, collision: bool, localized_proj=None) -> dict[str, Any]:
+    def _info(
+        self,
+        proj,
+        collision: bool,
+        localized_proj=None,
+        wall_collision: bool | None = None,
+        obstacle_collision: bool | None = None,
+    ) -> dict[str, Any]:
         if localized_proj is None:
             localized_proj = proj
+        if wall_collision is None:
+            wall_collision = False
+        if obstacle_collision is None:
+            obstacle_collision = False
         return {
             "x": self.state.x,
             "y": self.state.y,
@@ -788,10 +839,13 @@ class RacingKartEnv(gym.Env):
             "heading_error": proj.heading_error,
             "localized_heading_error": localized_proj.heading_error,
             "collision": collision,
+            "wall_collision": wall_collision,
+            "obstacle_collision": obstacle_collision,
             "stopped": self.stopped_steps >= self.max_stopped_steps,
             "finished": self.episode_finished,
             "finish_reason": self.finish_reason,
             "finish_progress_s": self.finish_progress_s,
+            "passed_obstacle_count": self.passed_obstacle_count,
             "time": self.steps * self.dt,
         }
 

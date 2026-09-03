@@ -28,6 +28,10 @@ ENV_RUNTIME_OVERRIDE_KEYS = (
     "wall_clearance_m",
     "obstacle_placement_attempts",
 )
+TRAIN_RUNTIME_OVERRIDE_KEYS = (
+    "total_timesteps",
+    "curriculum",
+)
 
 
 def load_config(path: str | Path | None) -> dict[str, Any]:
@@ -61,6 +65,15 @@ def load_config_for_model(model_path: str | Path, base_config: dict[str, Any]) -
     for key in ENV_RUNTIME_OVERRIDE_KEYS:
         if key in base_env_cfg:
             env_cfg[key] = copy.deepcopy(base_env_cfg[key])
+    if "reward" in base_config:
+        config["reward"] = copy.deepcopy(base_config["reward"])
+    train_cfg = config.setdefault("train", {})
+    base_train_cfg = base_config.get("train", {})
+    for key in TRAIN_RUNTIME_OVERRIDE_KEYS:
+        if key in base_train_cfg:
+            train_cfg[key] = copy.deepcopy(base_train_cfg[key])
+        else:
+            train_cfg.pop(key, None)
     # Saved training configs are copied from configs/default.yaml, so keep relative
     # paths such as lane.csv anchored to the caller's base config directory.
     config["_config_path"] = base_config["_config_path"]

@@ -75,6 +75,9 @@ class FinishRateCallback(BaseCallback):
     def __init__(self, window_size: int = 100):
         super().__init__()
         self.finished_history: deque[bool] = deque(maxlen=window_size)
+        self.wall_collision_history: deque[bool] = deque(maxlen=window_size)
+        self.obstacle_collision_history: deque[bool] = deque(maxlen=window_size)
+        self.passed_obstacle_history: deque[int] = deque(maxlen=window_size)
 
     def _on_step(self) -> bool:
         dones = self.locals.get("dones", [])
@@ -82,9 +85,15 @@ class FinishRateCallback(BaseCallback):
         for done, info in zip(dones, infos):
             if done:
                 self.finished_history.append(bool(info.get("finished", False)))
+                self.wall_collision_history.append(bool(info.get("wall_collision", False)))
+                self.obstacle_collision_history.append(bool(info.get("obstacle_collision", False)))
+                self.passed_obstacle_history.append(int(info.get("passed_obstacle_count", 0)))
         if self.finished_history:
             self.logger.record("rollout/finish_rate_100", float(np.mean(self.finished_history)))
             self.logger.record("rollout/finish_count_100", int(sum(self.finished_history)))
+            self.logger.record("rollout/wall_collision_rate_100", float(np.mean(self.wall_collision_history)))
+            self.logger.record("rollout/obstacle_collision_rate_100", float(np.mean(self.obstacle_collision_history)))
+            self.logger.record("rollout/passed_obstacles_mean_100", float(np.mean(self.passed_obstacle_history)))
         return True
 
 
