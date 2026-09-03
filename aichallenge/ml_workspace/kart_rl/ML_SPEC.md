@@ -112,13 +112,15 @@ Gymnasiumの観測空間は `Box(-1, 1, shape=(8,), dtype=float32)` です。
 
 ## 行動
 
-デフォルトのLiDAR版では、行動はステア角のみです。速度は `vehicle.max_speed_mps` を目標速度として固定します。
+デフォルトのLiDAR版では、行動は目標速度とステア角です。
 
 | Index | 名前 | 内容 |
 |---:|---|---|
-| 0 | steer_ratio | ステア角 |
+| 0 | target_speed_ratio | 目標速度 |
+| 1 | steer_ratio | ステア角 |
 
-`action[0]` は `[-1, 1]` から `[-max_steer_rad, max_steer_rad]` に変換します。状態観測版のようなpure pursuit補助は使いません。
+`action[0]` は `[-1, 1]` から `[min_speed_mps, max_speed_mps]` に変換します。
+`action[1]` は `[-1, 1]` から `[-max_steer_rad, max_steer_rad]` に変換します。状態観測版のようなpure pursuit補助は使いません。
 
 デフォルトLiDAR版の出力先:
 
@@ -144,12 +146,12 @@ uv run kart-rl-viewer
 |---:|---|---|
 | 0 | steer_correction_ratio | pure pursuitステアへの補正 |
 
-### 目標速度
+### LiDAR版の目標速度
 
-目標速度は action からは決めず、常に `max_speed_mps` です。
+目標速度はLiDAR版では action から決めます。
 
 ```text
-target_speed = max_speed
+target_speed = min_speed + 0.5 * (action[0] + 1.0) * (max_speed - min_speed)
 ```
 
 現在速度から目標速度へ、加速度上限またはブレーキ上限の範囲内で近づけます。

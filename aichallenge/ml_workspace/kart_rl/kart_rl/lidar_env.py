@@ -55,7 +55,7 @@ class LidarRacingKartEnv(RacingKartEnv):
         return obs
 
     def _apply_action(self, action: np.ndarray) -> None:
-        target_speed = self.max_speed
+        target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
         speed_error = target_speed - self.state.speed
         accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
         speed_step = float(np.clip(speed_error, -accel_limit * self.dt, accel_limit * self.dt))

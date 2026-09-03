@@ -371,8 +371,9 @@ def env_summary(config: dict) -> str:
     localization_delay = float(env_cfg.get("localization_delay_sec", 0.0))
     steering_delay = float(env_cfg.get("steering_delay_sec", 0.0))
     max_speed = float(vehicle_cfg.get("max_speed_mps", 0.0))
+    speed_label = "learned_v" if action_dim >= 2 else "target_v"
     return (
-        f"env: action={action_dim}  target_v={max_speed:.2f}m/s  "
+        f"env: action={action_dim}  {speed_label}<={max_speed:.2f}m/s  "
         f"obstacles={obstacles}  loc_delay={localization_delay:.2f}s  steer_delay={steering_delay:.2f}s"
     )
 

@@ -169,7 +169,10 @@ class LidarRlControllerNode(Node):
             self.get_logger().warn("PPO policy returned no actions; skipping command publication.")
             return
 
-        target_speed = self.max_speed
+        if action.size >= 2:
+            target_speed = self.min_speed + 0.5 * (float(action[0]) + 1.0) * (self.max_speed - self.min_speed)
+        else:
+            target_speed = self.max_speed
         speed_error = target_speed - self.current_speed
         accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
         accel = float(np.clip(speed_error / max(self.control_dt, 1e-3), -accel_limit, accel_limit))
@@ -178,6 +181,7 @@ class LidarRlControllerNode(Node):
 
         cmd = AckermannControlCommand()
         cmd.stamp = self.get_clock().now().to_msg()
+        cmd.longitudinal.speed = target_speed
         cmd.longitudinal.acceleration = accel
         cmd.lateral.steering_tire_angle = steer
         self.pub_control.publish(cmd)

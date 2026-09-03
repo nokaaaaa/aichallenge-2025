@@ -17,6 +17,7 @@ lidar:
   range_max: 25.0
   sample_ratio: 0.5
   ray_chunk_size: 64
+  include_vehicle_state: true
   include_obstacle_state: true
 
 vehicle:
@@ -32,7 +33,7 @@ vehicle:
 
 env:
   type: "lidar"
-  action_dim: 1
+  action_dim: 2
   dt: 0.05
   max_episode_steps: 4000
   start_pose_awsim:
