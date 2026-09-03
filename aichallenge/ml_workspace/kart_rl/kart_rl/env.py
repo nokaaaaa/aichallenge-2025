@@ -131,6 +131,27 @@ class RacingKartEnv(gym.Env):
         self._steer_command_history: deque[tuple[float, float]] = deque()
         self.obstacle_vehicles: list[ObstacleVehicle] = []
 
+    def set_training_curriculum(
+        self,
+        *,
+        obstacle_vehicle_count: int | None = None,
+        max_speed_mps: float | None = None,
+        localization_delay_sec: float | None = None,
+        steering_delay_sec: float | None = None,
+        max_steer_correction_ratio: float | None = None,
+    ) -> None:
+        if obstacle_vehicle_count is not None:
+            self.obstacle_vehicle_count = int(obstacle_vehicle_count)
+        if max_speed_mps is not None:
+            self.max_speed = float(max_speed_mps)
+            self.projection_window_m = max(20.0, self.max_speed * self.dt * 10.0)
+        if localization_delay_sec is not None:
+            self.localization_delay_sec = max(0.0, float(localization_delay_sec))
+        if steering_delay_sec is not None:
+            self.steering_delay_sec = max(0.0, float(steering_delay_sec))
+        if max_steer_correction_ratio is not None:
+            self.max_steer_correction_ratio = float(max_steer_correction_ratio)
+
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
         start_s = (

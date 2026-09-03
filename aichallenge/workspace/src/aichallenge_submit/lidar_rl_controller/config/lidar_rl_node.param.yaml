@@ -8,6 +8,8 @@
     lidar:
       range_min: 0.0
       range_max: 25.0
+      sample_ratio: 0.5
+      frame_stack: 4
 
     scan:
       topic: "/sensing/lidar/scan"

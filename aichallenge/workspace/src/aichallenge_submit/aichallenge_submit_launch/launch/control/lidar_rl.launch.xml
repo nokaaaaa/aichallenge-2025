@@ -5,10 +5,10 @@
   <arg name="odometry_topic" default="/localization/kinematic_state"/>
   <arg name="control_cmd_topic" default="/control/command/control_cmd"/>
   <arg name="param_file" default="$(find-pkg-share lidar_rl_controller)/config/lidar_rl_node.param.yaml"/>
-  <arg name="model_path" default="/aichallenge/ml_workspace/kart_rl/models/ppo_kart_lidar"/>
-  <!-- 
-  <arg name="model_path" default="/aichallenge/ml_workspace/kart_rl/models/ppo_kart_lidar_20260902-115134/ppo_kart_lidar_policy.npz"/>
-  -->
+  <!-- <arg name="model_path" default="/aichallenge/ml_workspace/kart_rl/models/ppo_kart_lidar"/> -->
+  
+  <arg name="model_path" default="/aichallenge/ml_workspace/kart_rl/models/ppo_kart_lidar_20260902-105812/ppo_kart_lidar_policy.npz"/>
+ 
 
   <node pkg="lidar_rl_controller"
         exec="lidar_rl_controller_node.py"

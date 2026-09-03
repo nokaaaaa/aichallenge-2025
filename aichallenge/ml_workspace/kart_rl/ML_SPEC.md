@@ -63,7 +63,7 @@ vehicle:
 
 ## デフォルト観測: LiDAR
 
-`configs/default.yaml` は、車両先頭LiDARの距離配列に車速と現在舵角を加えた値を方策入力にします。
+`configs/default.yaml` は、車両先頭LiDARの距離配列を時系列に積み、車速と現在舵角を加えた値を方策入力にします。
 
 ```yaml
 env:
@@ -85,7 +85,7 @@ lidar:
   range_max: 25.0
 ```
 
-入力側のLiDARビーム数は、デフォルトでは `lidar.sample_ratio: 0.5` により375本です。観測空間は `Box(0, 1, shape=(377,), dtype=float32)` で、375本の `range / range_max` に、`speed / max_speed` と正規化舵角を連結します。交点がない場合は `range_max` になります。`lidar.sample_ratio` を変えると入力側のビーム数も変わります。
+入力側のLiDARビーム数は、デフォルトでは `lidar.sample_ratio: 0.5` により375本です。`lidar.frame_stack: 4` により直近4フレームを古い順に連結し、最後に `speed / max_speed` と正規化舵角を加えます。観測空間は `Box(0, 1, shape=(1502,), dtype=float32)` です。交点がない場合は `range_max` になります。`lidar.sample_ratio` や `lidar.frame_stack` を変えると入力次元も変わります。
 
 ## 状態観測版
 
@@ -377,7 +377,7 @@ LiDARは入力側で間引いており、間引き率は `lidar.sample_ratio` �
 
 デフォルトLiDAR版は `uv run kart-rl-train` で学習し、`uv run kart-rl-eval` で `rollouts/latest_lidar.npz` を生成します。
 
-デフォルト設定は固定障害物なしの初期学習用です。固定障害物ありの課題は、デフォルト設定で走行方策を作ったあとに `obstacle_vehicle_count` と `fixed_obstacles` を有効化し、`--resume-model models/ppo_kart_lidar` で追加学習する前提です。
+デフォルト設定は固定障害物ありです。`uv run kart-rl-train` は、完走報酬を初期から観測しやすくするため、学習中だけ低速・障害物なしから固定障害物3台へ段階的に上げるカリキュラムを使います。viewer と評価は最終条件の固定障害物3台で実行します。
 
 状態観測版を500kステップ学習した過去の評価例:
 

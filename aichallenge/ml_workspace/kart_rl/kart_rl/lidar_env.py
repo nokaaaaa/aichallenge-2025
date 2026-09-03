@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -24,11 +25,18 @@ class LidarRacingKartEnv(RacingKartEnv):
         self.range_min = float(lidar_cfg["range_min"])
         self.range_max = float(lidar_cfg["range_max"])
         self.ray_chunk_size = int(lidar_cfg.get("ray_chunk_size", 64))
+        self.frame_stack = max(1, int(lidar_cfg.get("frame_stack", 1)))
         self.include_vehicle_state = bool(lidar_cfg.get("include_vehicle_state", False))
         self.include_obstacle_state = bool(lidar_cfg.get("include_obstacle_state", False))
+        self.steering_mode = str(config["env"].get("lidar_steering_mode", "direct"))
         self.full_angles = np.arange(self.angle_min, self.angle_max + 0.5 * self.angle_increment, self.angle_increment)
         self.angles = self.full_angles[:: self.sample_stride]
-        observation_dim = len(self.angles) + (2 if self.include_vehicle_state else 0) + (3 if self.include_obstacle_state else 0)
+        self._scan_history: deque[np.ndarray] = deque(maxlen=self.frame_stack)
+        observation_dim = (
+            len(self.angles) * self.frame_stack
+            + (2 if self.include_vehicle_state else 0)
+            + (3 if self.include_obstacle_state else 0)
+        )
         self.observation_space = spaces.Box(
             low=np.zeros(observation_dim, dtype=np.float32),
             high=np.ones(observation_dim, dtype=np.float32),
@@ -39,8 +47,18 @@ class LidarRacingKartEnv(RacingKartEnv):
         self.lane_p0 = self.track.lane_segments[:, 0, :]
         self.lane_v = self.track.lane_segments[:, 1, :] - self.track.lane_segments[:, 0, :]
 
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
+        self._scan_history.clear()
+        return super().reset(seed=seed, options=options)
+
     def _obs(self, proj) -> np.ndarray:
-        obs = (self._scan() / self.range_max).astype(np.float32)
+        scan = (self._scan() / self.range_max).astype(np.float32)
+        if not self._scan_history:
+            for _ in range(self.frame_stack):
+                self._scan_history.append(scan.copy())
+        else:
+            self._scan_history.append(scan)
+        obs = np.concatenate(list(self._scan_history)).astype(np.float32)
         if self.include_vehicle_state:
             vehicle_state = np.array(
                 [
@@ -63,7 +81,12 @@ class LidarRacingKartEnv(RacingKartEnv):
         accel_limit = self.max_accel if speed_error >= 0.0 else self.max_brake
         speed_step = float(np.clip(speed_error, -accel_limit * self.dt, accel_limit * self.dt))
         self.state.speed = float(np.clip(self.state.speed + speed_step, self.min_speed, self.max_speed))
-        self._set_commanded_steer(float(action[-1]) * self.max_steer)
+        if self.steering_mode == "pure_pursuit_correction":
+            base_steer = self._pure_pursuit_steer(self.localized_prev_s)
+            steer_correction = float(action[-1]) * self.max_steer * self.max_steer_correction_ratio
+            self._set_commanded_steer(base_steer + steer_correction)
+        else:
+            self._set_commanded_steer(float(action[-1]) * self.max_steer)
 
     def _is_collision(self, proj) -> bool:
         return self._is_wall_collision(proj) or self._collides_with_obstacle()

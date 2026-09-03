@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from collections import deque
 import re
 import time
 from pathlib import Path
@@ -78,6 +79,8 @@ class LidarRlControllerNode(Node):
         self.declare_parameter("model.path", "")
         self.declare_parameter("lidar.range_min", 0.0)
         self.declare_parameter("lidar.range_max", 25.0)
+        self.declare_parameter("lidar.sample_ratio", 0.5)
+        self.declare_parameter("lidar.frame_stack", 4)
         self.declare_parameter("scan.topic", "/sensing/lidar/scan")
         self.declare_parameter("odometry.topic", "/localization/kinematic_state")
         self.declare_parameter("control.topic", "/control/command/control_cmd")
@@ -100,6 +103,9 @@ class LidarRlControllerNode(Node):
 
         self.range_min = float(self.get_parameter("lidar.range_min").value)
         self.range_max = float(self.get_parameter("lidar.range_max").value)
+        self.sample_ratio = float(self.get_parameter("lidar.sample_ratio").value)
+        self.sample_stride = max(1, int(round(1.0 / max(self.sample_ratio, 1e-3))))
+        self.configured_frame_stack = max(1, int(self.get_parameter("lidar.frame_stack").value))
         self.scan_topic = str(self.get_parameter("scan.topic").value)
         self.odometry_topic = str(self.get_parameter("odometry.topic").value)
         self.control_topic = str(self.get_parameter("control.topic").value)
@@ -113,6 +119,7 @@ class LidarRlControllerNode(Node):
         self.input_dim = self.policy.input_dim
         self.current_speed = 0.0
         self.current_steer = 0.0
+        self.scan_history: deque[np.ndarray] = deque(maxlen=self.configured_frame_stack)
         self.inference_times: list[float] = []
         self.last_log_time = self.get_clock().now()
 
@@ -133,7 +140,8 @@ class LidarRlControllerNode(Node):
 
         self.get_logger().info(
             f"PPO lidar RL controller ready: scan={self.scan_topic}, odom={self.odometry_topic}, "
-            f"control={self.control_topic}, input_dim={self.input_dim}, model={model_path}"
+            f"control={self.control_topic}, input_dim={self.input_dim}, "
+            f"sample_ratio={self.sample_ratio}, frame_stack={self.configured_frame_stack}, model={model_path}"
         )
 
     def odometry_callback(self, msg: Odometry) -> None:
@@ -145,16 +153,42 @@ class LidarRlControllerNode(Node):
         ranges = np.asarray(msg.ranges, dtype=np.float32)
         ranges = np.nan_to_num(ranges, nan=self.range_max, posinf=self.range_max, neginf=self.range_max)
         ranges = np.clip(ranges, self.range_min, self.range_max)
-        has_vehicle_state = (
-            self.input_dim > 2
-            and len(ranges) != self.input_dim
-            and (len(ranges) == self.input_dim - 2 or len(ranges) % (self.input_dim - 2) == 0)
-        )
-        lidar_dim = self.input_dim - 2 if has_vehicle_state else self.input_dim
-        if len(ranges) != lidar_dim:
-            idx = np.linspace(0, max(len(ranges) - 1, 0), lidar_dim, dtype=int)
-            ranges = ranges[idx] if len(ranges) else np.full(lidar_dim, self.range_max, dtype=np.float32)
-        obs = ranges / self.range_max
+        ranges = ranges[:: self.sample_stride]
+
+        has_vehicle_state = False
+        lidar_dim = len(ranges)
+        frame_stack = self.configured_frame_stack
+        if lidar_dim > 0:
+            if self.input_dim >= 2 and (self.input_dim - 2) % lidar_dim == 0:
+                has_vehicle_state = True
+                frame_stack = max(1, (self.input_dim - 2) // lidar_dim)
+            elif self.input_dim % lidar_dim == 0:
+                frame_stack = max(1, self.input_dim // lidar_dim)
+            else:
+                expected_lidar_total = self.input_dim - 2 if self.input_dim > 2 else self.input_dim
+                lidar_dim = max(1, expected_lidar_total // frame_stack)
+                idx = np.linspace(0, max(len(ranges) - 1, 0), lidar_dim, dtype=int)
+                ranges = ranges[idx] if len(ranges) else np.full(lidar_dim, self.range_max, dtype=np.float32)
+                has_vehicle_state = self.input_dim == lidar_dim * frame_stack + 2
+        else:
+            lidar_dim = max(1, (self.input_dim - 2) // frame_stack if self.input_dim > 2 else self.input_dim // frame_stack)
+            ranges = np.full(lidar_dim, self.range_max, dtype=np.float32)
+            has_vehicle_state = self.input_dim == lidar_dim * frame_stack + 2
+
+        if self.scan_history.maxlen != frame_stack:
+            self.scan_history = deque(self.scan_history, maxlen=frame_stack)
+        scan = ranges / self.range_max
+        if not self.scan_history:
+            for _ in range(frame_stack):
+                self.scan_history.append(scan.copy())
+        else:
+            self.scan_history.append(scan)
+        obs = np.concatenate(list(self.scan_history)).astype(np.float32)
+
+        expected_lidar_total = self.input_dim - 2 if has_vehicle_state else self.input_dim
+        if obs.size != expected_lidar_total:
+            idx = np.linspace(0, max(obs.size - 1, 0), expected_lidar_total, dtype=int)
+            obs = obs[idx] if obs.size else np.ones(expected_lidar_total, dtype=np.float32)
         if has_vehicle_state:
             vehicle_state = np.array(
                 [

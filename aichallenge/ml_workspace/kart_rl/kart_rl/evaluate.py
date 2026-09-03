@@ -67,13 +67,16 @@ def collect_rollout_data(
         if lidar_scans:
             lidar_cfg = config["lidar"]
             sample_ratio = float(lidar_cfg.get("sample_ratio", 1.0))
+            frame_stack = max(1, int(lidar_cfg.get("frame_stack", 1)))
             angle_min = float(lidar_cfg["angle_min"])
             angle_max = float(lidar_cfg["angle_max"])
             angle_increment = float(lidar_cfg["angle_increment"])
             full_angles = np.arange(angle_min, angle_max + 0.5 * angle_increment, angle_increment, dtype=np.float32)
             sample_stride = max(1, int(round(1.0 / max(sample_ratio, 1e-3))))
             lidar_angles = full_angles[::sample_stride]
-            lidar_scan_array = np.asarray(lidar_scans, dtype=np.float32)[:, : len(lidar_angles)]
+            obs_array = np.asarray(lidar_scans, dtype=np.float32)
+            lidar_total = len(lidar_angles) * frame_stack
+            lidar_scan_array = obs_array[:, :lidar_total][:, -len(lidar_angles) :]
             save_data.update(
                 lidar_ranges=lidar_scan_array * float(lidar_cfg["range_max"]),
                 lidar_angles=lidar_angles,

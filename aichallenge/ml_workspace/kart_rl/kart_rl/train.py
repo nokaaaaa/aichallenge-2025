@@ -10,7 +10,7 @@ import numpy as np
 import yaml
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -86,6 +86,48 @@ class FinishRateCallback(BaseCallback):
             self.logger.record("rollout/finish_rate_100", float(np.mean(self.finished_history)))
             self.logger.record("rollout/finish_count_100", int(sum(self.finished_history)))
         return True
+
+
+class CurriculumCallback(BaseCallback):
+    def __init__(self, schedule: list[dict]):
+        super().__init__()
+        self.schedule = sorted(schedule, key=lambda item: int(item.get("timesteps", 0)))
+        self.active_index = -1
+
+    def _on_training_start(self) -> None:
+        self._apply_current_stage()
+
+    def _on_step(self) -> bool:
+        self._apply_current_stage()
+        return True
+
+    def _apply_current_stage(self) -> None:
+        if not self.schedule:
+            return
+        next_index = self.active_index
+        for index, stage in enumerate(self.schedule):
+            if self.num_timesteps >= int(stage.get("timesteps", 0)):
+                next_index = index
+        if next_index != self.active_index:
+            stage = self.schedule[next_index]
+            kwargs = {}
+            if "obstacle_vehicle_count" in stage:
+                kwargs["obstacle_vehicle_count"] = int(stage["obstacle_vehicle_count"])
+            if "max_speed_mps" in stage:
+                kwargs["max_speed_mps"] = float(stage["max_speed_mps"])
+            if "localization_delay_sec" in stage:
+                kwargs["localization_delay_sec"] = float(stage["localization_delay_sec"])
+            if "steering_delay_sec" in stage:
+                kwargs["steering_delay_sec"] = float(stage["steering_delay_sec"])
+            if "max_steer_correction_ratio" in stage:
+                kwargs["max_steer_correction_ratio"] = float(stage["max_steer_correction_ratio"])
+            if kwargs:
+                self.training_env.env_method("set_training_curriculum", **kwargs)
+            self.active_index = next_index
+            self.logger.record("curriculum/stage", self.active_index)
+            for key, value in kwargs.items():
+                self.logger.record(f"curriculum/{key}", value)
+            print(f"Curriculum stage {self.active_index}: {kwargs}")
 
 
 def export_ppo_policy_npz(model: PPO, model_path: Path) -> Path:
@@ -164,12 +206,16 @@ def main() -> None:
         print(f"Resuming model: {resume_model_path}")
     timesteps = int(args.timesteps or train_cfg["total_timesteps"])
     try:
+        callbacks: list[BaseCallback] = [FinishRateCallback()]
+        curriculum = train_cfg.get("curriculum")
+        if curriculum:
+            callbacks.append(CurriculumCallback(list(curriculum)))
         try:
             model.learn(
                 total_timesteps=timesteps,
                 progress_bar=True,
                 reset_num_timesteps=resume_model_path is None,
-                callback=FinishRateCallback(),
+                callback=CallbackList(callbacks),
             )
         except KeyboardInterrupt:
             print("Training interrupted. Saving current model before exit...")
