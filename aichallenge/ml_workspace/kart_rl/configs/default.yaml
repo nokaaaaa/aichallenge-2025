@@ -18,7 +18,7 @@ lidar:
   sample_ratio: 0.5
   ray_chunk_size: 64
   include_vehicle_state: true
-  include_obstacle_state: true
+  include_obstacle_state: false
 
 vehicle:
   wheelbase_m: 1.087
@@ -33,7 +33,7 @@ vehicle:
 
 env:
   type: "lidar"
-  action_dim: 2
+  action_dim: 1
   dt: 0.05
   max_episode_steps: 4000
   start_pose_awsim:
@@ -49,14 +49,8 @@ env:
   min_moving_speed_mps: 0.5
   max_stopped_steps: 120
   boundary_margin_m: 0.15
-  obstacle_vehicle_count: 3
-  fixed_obstacles:
-    - s_offset_m: 11.0
-      lateral_m: -1.1
-    - s_offset_m: 20.0
-      lateral_m: 1.1
-    - s_offset_m: 27.0
-      lateral_m: -1.0
+  obstacle_vehicle_count: 0
+  fixed_obstacles: []
   obstacle_min_gap_m: 8.0
   obstacle_start_clearance_m: 8.0
   obstacle_lateral_margin_m: 0.25

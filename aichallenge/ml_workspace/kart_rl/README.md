@@ -2,7 +2,7 @@
 
 Python + Gymnasium + Stable-Baselines3 + uv で動く、レーシングカート用のローカル強化学習ワークスペースです。
 
-既存racelineを1周の進捗軸、`configs/lane.csv` を固定レーン情報として使い、車両先頭LiDARの距離配列だけを入力にして学習します。ROS/AWSIMは使わないため、学習ループの動作確認を軽く回せます。
+既存racelineを進捗軸、`configs/lane.csv` を固定レーン情報として使い、車両先頭LiDARの距離配列に車速と現在舵角を加えた入力で学習します。ROS/AWSIMは使わないため、学習ループの動作確認を軽く回せます。
 
 ## 構成
 
@@ -73,7 +73,9 @@ models/ppo_kart_lidar_<timestamp>/
 └─ config.yaml
 ```
 
-`kart-rl-eval` と `lidar_rl` の ROS 実行は、`models/ppo_kart_lidar_<timestamp>/` のうち timestamp が最新のディレクトリからモデルを読みます。`models` 直下の `*_latest*` symlink や `.zip` / `.npz` は自動選択では使いません。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「1周完了」を正に、「壁接触」「横偏差」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
+`kart-rl-eval` と `lidar_rl` の ROS 実行は、`models/ppo_kart_lidar_<timestamp>/` のうち timestamp が最新のディレクトリからモデルを読みます。`models` 直下の `*_latest*` symlink や `.zip` / `.npz` は自動選択では使いません。学習デバイスは `configs/default.yaml` の `train.device: "cuda"` でGPUを指定しています。報酬は「中心線方向の進捗」「速度」「ゴール区間到達」を正に、「壁接触」「方位偏差」「急な操作」「進捗にならない移動」を負にしています。
+
+デフォルト設定は、最初から完了報酬を観測できるように固定障害物なしの初期学習用です。障害物回避を学習する場合は、まずデフォルトで走行方策を作ってから、`obstacle_vehicle_count` と `fixed_obstacles` を戻して `--resume-model models/ppo_kart_lidar` で追加学習します。
 
 ## TensorBoard
 

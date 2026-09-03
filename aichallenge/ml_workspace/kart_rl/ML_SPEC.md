@@ -7,7 +7,7 @@
 固定コース上でレーシングカートを走行させ、以下を満たす方策を学習します。
 
 - 壁、レーン境界に当たらない
-- 1周をなるべく早く完走する
+- 指定されたゴール区間までなるべく早く走る
 
 学習環境はROS/AWSIMを使わない2D簡易シミュレーションです。Stable-Baselines3のPPOを使い、`uv` で依存関係を管理します。
 
@@ -63,14 +63,14 @@ vehicle:
 
 ## デフォルト観測: LiDAR
 
-`configs/default.yaml` は、車両先頭LiDARの距離配列だけを方策入力にします。
+`configs/default.yaml` は、車両先頭LiDARの距離配列に車速と現在舵角を加えた値を方策入力にします。
 
 ```yaml
 env:
   type: "lidar"
 ```
 
-横偏差、方位偏差、速度、参照線曲率は方策の観測には含めません。ただし報酬計算、ラップ判定、壁接触判定には環境内部で参照経路と境界情報を使います。
+横偏差、方位偏差、参照線曲率は方策の観測には含めません。ただし報酬計算、ラップ判定、壁接触判定には環境内部で参照経路と境界情報を使います。
 
 LiDARは車両先頭中央に取り付けた想定です。
 
@@ -85,7 +85,7 @@ lidar:
   range_max: 25.0
 ```
 
-ビーム数はデフォルトで750本です。観測空間は `Box(0, 1, shape=(750,), dtype=float32)` で、各値は `range / range_max` です。交点がない場合は `range_max` になります。`lidar.sample_ratio` を変えると入力側のビーム数も変わります。
+入力側のLiDARビーム数は、デフォルトでは `lidar.sample_ratio: 0.5` により375本です。観測空間は `Box(0, 1, shape=(377,), dtype=float32)` で、375本の `range / range_max` に、`speed / max_speed` と正規化舵角を連結します。交点がない場合は `range_max` になります。`lidar.sample_ratio` を変えると入力側のビーム数も変わります。
 
 ## 状態観測版
 
@@ -112,15 +112,15 @@ Gymnasiumの観測空間は `Box(-1, 1, shape=(8,), dtype=float32)` です。
 
 ## 行動
 
-デフォルトのLiDAR版では、行動は目標速度とステア角です。
+デフォルトのLiDAR版では、行動はステア角だけです。速度は固定目標速度として `max_speed_mps` に向かって加速します。
 
 | Index | 名前 | 内容 |
 |---:|---|---|
-| 0 | target_speed_ratio | 目標速度 |
-| 1 | steer_ratio | ステア角 |
+| 0 | steer_ratio | ステア角 |
 
-`action[0]` は `[-1, 1]` から `[min_speed_mps, max_speed_mps]` に変換します。
-`action[1]` は `[-1, 1]` から `[-max_steer_rad, max_steer_rad]` に変換します。状態観測版のようなpure pursuit補助は使いません。
+`action[0]` は `[-1, 1]` から `[-max_steer_rad, max_steer_rad]` に変換します。状態観測版のようなpure pursuit補助は使いません。
+
+`action_dim: 2` にした古い設定では、`action[0]` を `[-1, 1]` から `[min_speed_mps, max_speed_mps]` に変換し、`action[1]` をステア角に使います。
 
 デフォルトLiDAR版の出力先:
 
@@ -148,7 +148,7 @@ uv run kart-rl-viewer
 
 ### LiDAR版の目標速度
 
-目標速度はLiDAR版では action から決めます。
+デフォルトの1次元行動では、目標速度は `max_speed_mps` です。2次元行動を使う場合だけ action から決めます。
 
 ```text
 target_speed = min_speed + 0.5 * (action[0] + 1.0) * (max_speed - min_speed)
@@ -203,7 +203,7 @@ reward =
 reward:
   progress: 35.0
   speed: 0.04
-  lateral_error: 1.2
+  lateral_error: 0.0
   heading_error: 0.5
   steer: 0.01
   action_smooth: 0.02
@@ -235,7 +235,8 @@ reward:
 | 条件 | 種別 | 内容 |
 |---|---|---|
 | 壁接触 | terminated | 横偏差が許容境界を超えた |
-| 1周完了 | terminated | `lap_count >= finish_laps` |
+| ゴール区間到達 | terminated | `finish_on_start_straight_exit: true` の場合、開始直線区間を抜けた |
+| 1周完了 | terminated | `finish_on_start_straight_exit: false` の場合、`lap_count >= finish_laps` |
 | 停止継続 | terminated | `speed < min_moving_speed_mps` が `max_stopped_steps` 続いた |
 | 最大ステップ | truncated | `steps >= max_episode_steps` |
 
@@ -376,7 +377,7 @@ LiDARは入力側で間引いており、間引き率は `lidar.sample_ratio` �
 
 デフォルトLiDAR版は `uv run kart-rl-train` で学習し、`uv run kart-rl-eval` で `rollouts/latest_lidar.npz` を生成します。
 
-短時間の疎通確認用に512ステップだけ学習したLiDARモデルでは、まだ1周完了できず壁接触で終了します。LiDARのみ入力、直接ステア出力のため、実用的な挙動にはデフォルトの `total_timesteps: 500000` 以上の学習を前提にします。
+デフォルト設定は固定障害物なしの初期学習用です。固定障害物ありの課題は、デフォルト設定で走行方策を作ったあとに `obstacle_vehicle_count` と `fixed_obstacles` を有効化し、`--resume-model models/ppo_kart_lidar` で追加学習する前提です。
 
 状態観測版を500kステップ学習した過去の評価例:
 
